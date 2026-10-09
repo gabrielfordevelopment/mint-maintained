@@ -4,6 +4,8 @@
 
 ## [Unreleased] - ReleaseDate
 
+## [0.3.0] - 2026-10-09
+
 ### MINT Maintained
 
 - Continue development and releases in `gabrielfordevelopment/mint-maintained`.
@@ -11,6 +13,10 @@
 - Refine the compact UI with SVG icons, theme-aware hover backgrounds, and aligned footer controls.
 - Add regression coverage for adjacent mods with missing metadata.
 - Route update checks and downloads to this repository.
+- Preserve legacy profile backups when migration cannot be saved, and report save failures without panicking.
+- Reject unsupported cache versions with an error while preserving the original file.
+- Use the Cargo workspace version consistently in the application, CLI, and integration metadata.
+- Add manually triggered draft releases with versioned Windows/Linux downloads and updater-compatible archive aliases.
 
 ### General
 
@@ -74,7 +80,8 @@
 - Fix including same asset paths with different casings causing Unreal Engine to load neither ([#29](https://github.com/trumank/mint/issues/29))
 
 <!-- next-url -->
-[Unreleased]: https://github.com/gabrielfordevelopment/mint-maintained/compare/v0.2.10...HEAD
+[Unreleased]: https://github.com/gabrielfordevelopment/mint-maintained/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.3.0
 [0.2.10]: https://github.com/trumank/mint/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/trumank/mint/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/trumank/mint/compare/v0.2.7...v0.2.8

@@ -55,8 +55,8 @@ compatible with your architecture. For windows, this will be the
 `mint-vX.Y.Z-x86_64-pc-windows-msvc.zip`, where `X.Y.Z` is the release version.
 Extract this to anywhere you'd like to keep the executable.
 
-The first MINT Maintained release has not been published yet. Until then, build from
-source using the instructions below. Update checks and downloads target this repository.
+If no MINT Maintained release is available yet, build from source using the
+instructions below. Update checks and downloads target this repository.
 
 Then, we'll need to perform some first-time setup.
 
