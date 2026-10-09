@@ -32,6 +32,8 @@
 - Preserve unrelated changes and user-created commits. Keep changes within the requested scope; do not mix UI polish with unrelated dependency upgrades or cache refactors.
 - Treat tests as behavior contracts. Add meaningful regression coverage for logic fixes; do not weaken tests to hide production failures.
 - Keep UTF-8 text, preferably without BOM. Update this guidance or its linked skill when a change makes them inaccurate. Keep one root `AGENTS.md`; put reusable workflows in `.agents/skills/`.
+- Resolve questions from code, tests, and existing decisions first. Ask only about material unresolved behavior, data loss, external effects, or scope; use a stated reversible assumption for minor choices. Do not reopen decisions without new evidence.
+- Read the affected architecture contract before changing its behavior, and update it in the same task when necessary: [persistence](docs/architecture/persistence.md), [desktop UI and background work](docs/architecture/desktop-ui.md), [game integration and hook](docs/architecture/integration.md).
 
 ## Behavior and compatibility
 
@@ -70,6 +72,7 @@
 - On Windows, use an x64 Visual Studio Developer PowerShell with the MSVC C++ tools and Windows SDK. If detection picks an incomplete installation, initialize a working Build Tools installation explicitly.
 - Linux CI installs `libgtk-3-dev`, `gcc-mingw-w64`, and `pkg-config`; consult the workflow before changing platform setup.
 - For a development preview, use a dedicated directory outside the repository, for example `cargo run --locked -- --appdata ../mint-maintained-dev-data`. Do not add a real game path or credentials merely to populate a UI demo.
+- A fresh config can automatically discover the real game even with `--appdata`. For UI-only demos, clear the isolated config's game path and avoid installation, uninstall, launch, and self-update actions. Report headless, visible-desktop, and in-game validation separately.
 - For production Rust, dependency, or build-configuration changes, run the CI checks before a requested commit or PR:
 
   ```text
@@ -84,10 +87,15 @@
 - The CI host-test scope is `mint` and `mint_lib`. Do not substitute `cargo test --workspace` without reviewing the injected hook's runtime assumptions.
 - For UI changes, inspect both themes, normal/hover/selected/disabled states, footer and Settings sizing, long names, groups, and missing metadata. Use the existing egui interaction tests where appropriate; say explicitly if manual interaction was unavailable.
 - Run workflow validation for CI changes and platform-specific checks where available. Report failed, skipped, or unavailable checks accurately; never claim prior-task results as current validation.
+- For agent guidance, architecture documents, or their checker, run `python scripts/check_agent_guidance.py` and `python -m unittest discover -s scripts/tests`. The `Agent guidance` CI job enforces structural validity; content still requires review against the implementation.
 
 ## Git authority and skill routing
 
 - Use [mint-maintained-git-workflow](.agents/skills/mint-maintained-git-workflow/SKILL.md) for branching, staging, committing, pushing, PR preparation, merging, and releases.
+- Use [mint-maintained-data-migration](.agents/skills/mint-maintained-data-migration/SKILL.md) for persisted settings, profiles, cache formats, migrations, and compatible readers/writers.
+- Use [mint-maintained-desktop-testing](.agents/skills/mint-maintained-desktop-testing/SKILL.md) for native GUI tests, visible previews, demo data, interaction evidence, and session cleanup.
+- Use [mint-maintained-code-review](.agents/skills/mint-maintained-code-review/SKILL.md) for requested code/diff/PR reviews and pre-merge assessments.
+- Use [mint-maintained-agent-files](.agents/skills/mint-maintained-agent-files/SKILL.md) for changing or auditing instruction files, skills, architecture contracts, and their routing.
 - The integration branch is `develop`; `master` remains the release branch. Feature/fix PRs target `develop`; release PRs target `master`. These instructions do not themselves create branches or configure GitHub protection.
 - Interpret `dev`, `develop`, and `development` as the repository's actual `develop` branch. Do not create separate branches for these aliases.
 - Follow the skill's setup guidance if `develop` is missing locally or remotely. Keep `master` under its existing name; do not substitute it for the integration branch.
