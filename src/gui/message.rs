@@ -1,8 +1,9 @@
 use std::collections::BTreeSet;
-use std::ops::DerefMut;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 use std::{collections::HashMap, sync::Arc};
 
+use futures::FutureExt;
 use snafu::prelude::*;
 use tokio::{
     sync::mpsc::{self, Sender},
@@ -18,25 +19,30 @@ use super::{
 use crate::gui::LastAction;
 use crate::integrate::*;
 use crate::mod_lints::{LintId, LintReport};
-use crate::state::{ModData_v0_1_0 as ModData, ModOrGroup};
+use crate::state::ModOrGroup;
 use crate::*;
 use crate::{
-    providers::{FetchProgress, ModInfo, ModStore},
+    providers::{FetchProgress, ModStore},
     state::ModConfig,
 };
 use mint_lib::error::GenericError;
 use mint_lib::mod_info::MetaConfig;
 use mint_lib::update::GitHubRelease;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Debug)]
 pub struct MessageHandle<S> {
     pub rid: RequestID,
     pub handle: JoinHandle<()>,
     pub state: S,
+    pub cancellation: Option<Arc<AtomicBool>>,
 }
 
 #[derive(Debug)]
 pub enum Message {
+    OperationFailed(RequestID),
     ResolveMods(ResolveMods),
     Integrate(Integrate),
     FetchModProgress(FetchModProgress),
@@ -50,6 +56,25 @@ pub enum Message {
 impl Message {
     pub fn handle(self, app: &mut App) {
         match self {
+            Self::OperationFailed(rid) => {
+                fn clear<S>(handle: &mut Option<MessageHandle<S>>, rid: RequestID) -> bool {
+                    if handle.as_ref().is_some_and(|handle| handle.rid == rid) {
+                        *handle = None;
+                        true
+                    } else {
+                        false
+                    }
+                }
+                let matched = clear(&mut app.resolve_mod_rid, rid)
+                    | clear(&mut app.integrate_rid, rid)
+                    | clear(&mut app.update_rid, rid)
+                    | clear(&mut app.check_updates_rid, rid)
+                    | clear(&mut app.lint_rid, rid)
+                    | clear(&mut app.self_update_rid, rid);
+                if matched {
+                    app.last_action = Some(LastAction::failure("A background operation stopped unexpectedly. No successful completion was reported. Inspect the log and retry; restart MINT if the error persists.".into()));
+                }
+            }
             Self::ResolveMods(msg) => msg.receive(app),
             Self::Integrate(msg) => msg.receive(app),
             Self::FetchModProgress(msg) => msg.receive(app),
@@ -66,8 +91,26 @@ impl Message {
 pub struct ResolveMods {
     rid: RequestID,
     specs: Vec<ModSpecification>,
-    result: Result<HashMap<ModSpecification, ModInfo>, ProviderError>,
+    result: Result<crate::providers::ResolvedMods, ProviderError>,
     is_dependency: bool,
+}
+
+fn spawn_reported(
+    rid: RequestID,
+    ctx: egui::Context,
+    tx: Sender<Message>,
+    future: impl std::future::Future<Output = ()> + Send + 'static,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        if std::panic::AssertUnwindSafe(future)
+            .catch_unwind()
+            .await
+            .is_err()
+        {
+            let _ = tx.send(Message::OperationFailed(rid)).await;
+            ctx.request_repaint();
+        }
+    })
 }
 
 impl ResolveMods {
@@ -81,8 +124,8 @@ impl ResolveMods {
         let store = app.state.store.clone();
         let ctx = ctx.clone();
         let tx = app.tx.clone();
-        let handle = tokio::spawn(async move {
-            let result = store.resolve_mods(&specs, false).await;
+        let handle = spawn_reported(rid, ctx.clone(), tx.clone(), async move {
+            let result = Ok(store.resolve_mods_partial(&specs, false).await);
             tx.send(Message::ResolveMods(Self {
                 rid,
                 specs,
@@ -98,6 +141,7 @@ impl ResolveMods {
             rid,
             handle,
             state: (),
+            cancellation: None,
         });
     }
 
@@ -109,7 +153,8 @@ impl ResolveMods {
                         .specs
                         .into_iter()
                         .collect::<HashSet<ModSpecification>>();
-                    for (resolved_spec, info) in resolved_mods {
+                    let mut additions: Vec<ModConfig> = Vec::new();
+                    for (resolved_spec, info) in resolved_mods.mods {
                         let is_dep = self.is_dependency || !primary_mods.contains(&resolved_spec);
                         let add = if is_dep {
                             // if mod is a dependency then check if there is a disabled
@@ -117,47 +162,68 @@ impl ResolveMods {
                             // is not a dependency then assume the user explicitly
                             // wants to add a specific mod version.
                             let active_profile = app.state.mod_data.active_profile.clone();
-                            !app.state.mod_data.any_mod_mut(
-                                &active_profile,
-                                |mc, mod_group_enabled| {
-                                    if mc.spec.satisfies_dependency(&resolved_spec) {
-                                        mc.enabled = true;
-                                        if let Some(mod_group_enabled) = mod_group_enabled {
-                                            *mod_group_enabled = true;
+                            !additions
+                                .iter()
+                                .any(|mc| mc.spec.satisfies_dependency(&resolved_spec))
+                                && !app.state.mod_data.any_mod_mut(
+                                    &active_profile,
+                                    |mc, mod_group_enabled| {
+                                        if mc.spec.satisfies_dependency(&resolved_spec) {
+                                            mc.enabled = true;
+                                            if let Some(mod_group_enabled) = mod_group_enabled {
+                                                *mod_group_enabled = true;
+                                            }
+                                            true
+                                        } else {
+                                            false
                                         }
-                                        true
-                                    } else {
-                                        false
-                                    }
-                                },
-                            )
+                                    },
+                                )
                         } else {
                             true
                         };
 
                         if add {
-                            let ModData {
-                                active_profile,
-                                profiles,
-                                ..
-                            } = app.state.mod_data.deref_mut().deref_mut();
-
-                            profiles.get_mut(active_profile).unwrap().mods.insert(
-                                0,
-                                ModOrGroup::Individual(ModConfig {
-                                    spec: info.spec.clone(),
-                                    required: info.suggested_require,
-                                    enabled: true,
-                                    priority: 0,
-                                }),
-                            );
+                            additions.push(ModConfig {
+                                spec: info.spec.clone(),
+                                required: info.suggested_require,
+                                enabled: true,
+                                priority: 0,
+                            });
                         }
                     }
-                    app.resolve_mod.clear();
-                    app.state.mod_data.save().unwrap();
-                    app.last_action = Some(LastAction::success(
-                        "mods successfully resolved".to_string(),
-                    ));
+                    app.state
+                        .mod_data
+                        .get_active_profile_mut()
+                        .mods
+                        .splice(0..0, additions.into_iter().map(ModOrGroup::Individual));
+                    app.resolve_mod = resolved_mods
+                        .errors
+                        .iter()
+                        .map(|(spec, _)| spec.url.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    app.last_action = Some(if resolved_mods.errors.is_empty() {
+                        LastAction::success("mods successfully resolved".to_string())
+                    } else {
+                        for (_, error) in &resolved_mods.errors {
+                            if let ProviderError::NoProvider { factory, .. } = error {
+                                app.window_provider_parameters =
+                                    Some(WindowProviderParameters::new(factory, &app.state));
+                                break;
+                            }
+                        }
+                        LastAction::failure(format!(
+                            "Some mods could not be added. Successful entries were kept. Retry the remaining inputs.\n{}",
+                            resolved_mods
+                                .errors
+                                .iter()
+                                .map(|(spec, error)| format!("{}: {error}", spec.url))
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        ))
+                    });
+                    app.report_save(app.state.mod_data.save());
                 }
                 Err(ProviderError::NoProvider { url: _, factory }) => {
                     app.window_provider_parameters =
@@ -167,7 +233,8 @@ impl ResolveMods {
                 Err(e) => {
                     error!("{}", e);
                     app.problematic_mod_id = e.opt_mod_id();
-                    app.last_action = Some(LastAction::failure(e.to_string()));
+                    app.last_action =
+                        Some(LastAction::failure(super::diagnostics::error_details(&e)));
                 }
             }
             app.resolve_mod_rid = None;
@@ -192,18 +259,29 @@ impl Integrate {
         ctx: egui::Context,
     ) -> MessageHandle<HashMap<ModSpecification, SpecFetchProgress>> {
         let rid = rc.next();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let cancellation = Some(cancelled.clone());
         MessageHandle {
             rid,
-            handle: tokio::task::spawn(async move {
-                let res =
-                    integrate_async(store, ctx.clone(), mods, fsd_pak, config, rid, tx.clone())
-                        .await;
+            handle: spawn_reported(rid, ctx.clone(), tx.clone(), async move {
+                let res = integrate_async(
+                    store,
+                    ctx.clone(),
+                    mods,
+                    fsd_pak,
+                    config,
+                    rid,
+                    tx.clone(),
+                    cancelled,
+                )
+                .await;
                 tx.send(Message::Integrate(Integrate { rid, result: res }))
                     .await
                     .unwrap();
                 ctx.request_repaint();
             }),
             state: Default::default(),
+            cancellation,
         }
     }
 
@@ -225,7 +303,8 @@ impl Integrate {
                 Err(e) => {
                     error!("{}", e);
                     app.problematic_mod_id = e.opt_mod_id();
-                    app.last_action = Some(LastAction::failure(e.to_string()));
+                    app.last_action =
+                        Some(LastAction::failure(super::diagnostics::error_details(&e)));
                 }
             }
             app.integrate_rid = None;
@@ -257,21 +336,24 @@ pub struct UpdateCache {
 }
 
 impl UpdateCache {
-    pub fn send(app: &mut App) {
+    pub fn send(app: &mut App, ctx: &egui::Context) {
+        let ctx = ctx.clone();
         let rid = app.request_counter.next();
         let tx = app.tx.clone();
         let store = app.state.store.clone();
-        let handle = tokio::spawn(async move {
+        let handle = spawn_reported(rid, ctx.clone(), tx.clone(), async move {
             let res = store.update_cache().await;
             tx.send(Message::UpdateCache(UpdateCache { rid, result: res }))
                 .await
                 .unwrap();
+            ctx.request_repaint();
         });
         app.last_action = None;
         app.update_rid = Some(MessageHandle {
             rid,
             handle,
             state: (),
+            cancellation: None,
         });
     }
 
@@ -292,7 +374,8 @@ impl UpdateCache {
                 Err(e) => {
                     error!("{}", e);
                     app.problematic_mod_id = e.opt_mod_id();
-                    app.last_action = Some(LastAction::failure(e.to_string()));
+                    app.last_action =
+                        Some(LastAction::failure(super::diagnostics::error_details(&e)));
                 }
             }
             app.update_rid = None;
@@ -312,7 +395,7 @@ impl CheckUpdates {
         let tx = app.tx.clone();
         let ctx = ctx.clone();
 
-        let handle = tokio::spawn(async move {
+        let handle = spawn_reported(rid, ctx.clone(), tx.clone(), async move {
             tx.send(Message::CheckUpdates(Self {
                 rid,
                 result: mint_lib::update::get_latest_release().await,
@@ -325,6 +408,7 @@ impl CheckUpdates {
             rid,
             handle,
             state: (),
+            cancellation: None,
         });
     }
 
@@ -351,6 +435,7 @@ impl CheckUpdates {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn integrate_async(
     store: Arc<ModStore>,
     ctx: egui::Context,
@@ -359,10 +444,14 @@ async fn integrate_async(
     config: MetaConfig,
     rid: RequestID,
     message_tx: Sender<Message>,
+    cancelled: Arc<AtomicBool>,
 ) -> Result<(), IntegrationError> {
     let update = false;
 
-    let mods = store.resolve_mods(&mod_specs, update).await?;
+    let mods = tokio::select! {
+        result = store.resolve_mods(&mod_specs, update) => result?,
+        _ = wait_for_cancel(&cancelled) => return Err(IntegrationError::Cancelled),
+    };
 
     let to_integrate = mod_specs
         .iter()
@@ -395,18 +484,28 @@ async fn integrate_async(
         }
     });
 
-    let paths = store.fetch_mods_ordered(&urls, update, Some(tx)).await?;
+    let paths = tokio::select! {
+        result = store.fetch_mods_ordered(&urls, update, Some(tx)) => result?,
+        _ = wait_for_cancel(&cancelled) => return Err(IntegrationError::Cancelled),
+    };
 
-    tokio::task::spawn_blocking(|| {
-        crate::integrate::integrate(
+    tokio::task::spawn_blocking(move || {
+        crate::integrate::integrate_with_cancel(
             fsd_pak,
             config,
             to_integrate.into_iter().zip(paths).collect(),
+            &cancelled,
         )
     })
     .await??;
 
     Ok(())
+}
+
+async fn wait_for_cancel(cancelled: &AtomicBool) {
+    while !cancelled.load(Ordering::Acquire) {
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
 }
 
 #[derive(Debug)]
@@ -427,7 +526,7 @@ impl LintMods {
     ) -> MessageHandle<()> {
         let rid = rc.next();
 
-        let handle = tokio::task::spawn(async move {
+        let handle = spawn_reported(rid, ctx.clone(), tx.clone(), async move {
             let paths_res =
                 resolve_async_ordered(store, ctx.clone(), mods.clone(), rid, tx.clone()).await;
             let mod_path_pairs_res =
@@ -442,8 +541,8 @@ impl LintMods {
                     )
                 })
                 .await
-                .unwrap()
-                .map_err(Into::into),
+                .map_err(IntegrationError::from)
+                .and_then(|result| result.map_err(Into::into)),
                 Err(e) => Err(e),
             };
 
@@ -463,6 +562,7 @@ impl LintMods {
             rid,
             handle,
             state: Default::default(),
+            cancellation: None,
         }
     }
 
@@ -486,10 +586,11 @@ impl LintMods {
                 Err(e) => {
                     error!("{}", e);
                     app.problematic_mod_id = e.opt_mod_id();
-                    app.last_action = Some(LastAction::failure(e.to_string()));
+                    app.last_action =
+                        Some(LastAction::failure(super::diagnostics::error_details(&e)));
                 }
             }
-            app.integrate_rid = None;
+            app.lint_rid = None;
         }
     }
 }
@@ -554,7 +655,7 @@ impl SelfUpdate {
         let rid = rc.next();
         MessageHandle {
             rid,
-            handle: tokio::task::spawn(async move {
+            handle: spawn_reported(rid, ctx.clone(), tx.clone(), async move {
                 let result = self_update_async(ctx.clone(), rid, tx.clone()).await;
                 tx.send(Message::SelfUpdate(SelfUpdate { rid, result }))
                     .await
@@ -562,6 +663,7 @@ impl SelfUpdate {
                 ctx.request_repaint();
             }),
             state: SelfUpdateProgress::Pending,
+            cancellation: None,
         }
     }
 
@@ -577,10 +679,10 @@ impl SelfUpdate {
                     error!("self update failed");
                     error!("{:#?}", e);
                     app.self_update_rid = None;
-                    app.last_action = Some(LastAction::failure("self update failed".to_string()));
+                    app.last_action =
+                        Some(LastAction::failure(super::diagnostics::error_details(&e)));
                 }
             }
-            app.integrate_rid = None;
         }
     }
 }

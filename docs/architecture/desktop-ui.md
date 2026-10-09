@@ -5,9 +5,14 @@
 - [src/gui/mod.rs](../../src/gui/mod.rs) owns the egui application, profiles/groups, sorting, Settings, and footer.
 - [src/gui/message.rs](../../src/gui/message.rs) dispatches asynchronous provider/download/integration operations and receives results. [RequestCounter](../../src/gui/request_counter.rs) identifies requests; matching IDs prevent stale results from applying to a newer operation.
 - [src/gui/icons.rs](../../src/gui/icons.rs) owns icon controls and display-scale-aware SVG texture reuse. [named_combobox.rs](../../src/gui/named_combobox.rs) owns profile/group selection controls.
+- [diagnostics.rs](../../src/gui/diagnostics.rs) formats error chains, redacts provider secrets and renders selectable/copyable details. The footer keeps a short status and opens a separate details window without changing row geometry.
 - [src/state/mod.rs](../../src/state/mod.rs) owns durable settings and profile data. Render code consumes those owners rather than maintaining a second persisted representation.
 
 Keep network and blocking integration outside the egui frame. When changing cancellation, profile switching, or result handling, inspect both dispatch and receive paths, including stale completion, failure, and progress updates. Preserve resolved mod/load ordering across asynchronous work.
+
+Tracked background tasks report unexpected panics through their request ID. Completion/failure clears only the matching operation; failed lint reports stop showing the running spinner. Closing a report window does not abandon an active worker. Integration cancellation retains its busy handle until the writer finishes; see the integration contract for staged replacement and locking.
+
+Partial imports preserve input order and keep errors available for retry; they are not permission for installation to ignore failures. Search highlighting maps lowercase matches back to original UTF-8 character boundaries, including characters whose lowercase representation changes length.
 
 ## UI invariants
 

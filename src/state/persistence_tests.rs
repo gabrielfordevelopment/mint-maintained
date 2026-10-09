@@ -1,5 +1,65 @@
 use super::*;
 
+#[test]
+fn invalid_profile_references_are_rejected_without_rewriting_data() {
+    for data in [
+        r#"{"version":"0.1.0","active_profile":"default","profiles":{"default":{"mods":[{"group_name":"missing","enabled":true}]}},"groups":{}}"#,
+        r#"{"version":"0.1.0","active_profile":"missing","profiles":{"default":{"mods":[]}},"groups":{}}"#,
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let dirs = Dirs::from_path(directory.path()).unwrap();
+        let path = dirs.config_dir.join("mod_data.json");
+        fs::write(&path, data).unwrap();
+        let result = State::init(dirs);
+        assert!(matches!(result, Err(StateError::InvalidModData { .. })));
+        assert_eq!(fs::read_to_string(path).unwrap(), data);
+    }
+}
+
+#[test]
+fn load_order_respects_priorities_groups_and_stable_ties() {
+    let config = |name: &str, priority, enabled| ModConfig {
+        spec: ModSpecification::new(name.into()),
+        priority,
+        enabled,
+        required: false,
+    };
+    let data = ModData_v0_1_0 {
+        active_profile: "default".into(),
+        profiles: [(
+            "default".into(),
+            ModProfile_v0_1_0 {
+                mods: vec![
+                    ModOrGroup::Individual(config("normal", 0, true)),
+                    ModOrGroup::Group {
+                        group_name: "group".into(),
+                        enabled: true,
+                    },
+                    ModOrGroup::Individual(config("last", i32::MIN, true)),
+                    ModOrGroup::Individual(config("disabled", i32::MAX, false)),
+                ],
+            },
+        )]
+        .into(),
+        groups: [(
+            "group".into(),
+            ModGroup {
+                mods: vec![config("high", 10, true), config("tie", 0, true)],
+            },
+        )]
+        .into(),
+    };
+    assert_eq!(
+        data.enabled_mods_ordered("default")
+            .unwrap()
+            .iter()
+            .map(|spec| spec.url.as_str())
+            .collect::<Vec<_>>(),
+        ["high", "normal", "tie", "last"]
+    );
+    assert!(data.enabled_mods_ordered("missing").is_err());
+}
+
 const LEGACY_PROFILES: &str = r#"{
     "active_profile":"custom",
     "profiles":{"custom":{"mods":[

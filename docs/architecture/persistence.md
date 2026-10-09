@@ -17,9 +17,11 @@ The source types and version declarations are authoritative; do not duplicate sc
 - Missing files use the owner's explicit default. Missing optional fields use compatible field defaults.
 - Known legacy data is converted at the persistence boundary. Do not scatter legacy readers through rendering or provider callers.
 - Malformed data returns an error without replacing the affected file. Unknown config/cache versions must fail safely, preserving the bytes for a newer reader or recovery.
+- Validate active-profile and group references after migration and before constructing the writable profile wrapper. Syntactically valid JSON with invalid references is an error, not permission to drop entries or create defaults. Read/validate settings and profiles before initialization writes either of them.
 - `profiles.json` is retained after migration as a recovery copy. Once `mod_data.json` exists, it is authoritative; an invalid current file must not silently resurrect older profiles. Removing the backup is a separate, explicit cleanup decision.
 - Initialization writes settings, migrated mod data, and provider cache. Merely launching the app is not a read-only inspection.
 - `ConfigWrapper` also attempts a save on drop. Drop failures are logged instead of panicking; callers that need to report success must call and check `save()` explicitly. This best-effort fallback is not a transaction or a guarantee against power loss.
+- Provider-store initialization returns cache-save failures. GUI save failures remain visible through error details and retain in-memory changes for retry; do not report them as saved. Startup errors open a recovery screen with the error chain, relevant folders and retry, without automatically repairing/resetting data.
 - Preserve the direct-byte deserialization workaround for tagged caches with numeric keys. A `serde_json::Value` round trip is not an interchangeable replacement without representative tests.
 - Preserve saved manual order and the meaning of released sorting fields. Sorting is presentation state, not a migration of stored mod order.
 
@@ -30,3 +32,9 @@ Identify the affected reader, writer, external shape, defaults, consumers, and o
 Use temporary directories and deterministic local fixtures. Cover missing, legacy, current, malformed, future-version, failed-write, and retry paths as applicable. Check both the returned result and the original bytes. Reopen the saved state to verify that retained legacy files do not override newer edits.
 
 Regression owners are [persistence_tests.rs](../../src/state/persistence_tests.rs), the cache tests in [cache.rs](../../src/providers/cache.rs), and the existing state/provider tests. Never use a real user's config or credentials as fixtures.
+
+## Partial provider failures
+
+`ModStore::resolve_mods_partial` preserves primary input order, deduplicates exact requests, then resolves dependencies in stable batches. Import retains successful entries and leaves failed specifications available to retry. The strict `resolve_mods` API still returns an error if any required resolution fails; integration must not silently install an incomplete request.
+
+Cache refresh continues independent entries when one fails, preserves unavailable metadata/blobs, reports failed entries, and retains the old watermark so failures can be retried. The store attempts to persist successful updates and reports write errors. A partial refresh is not a fully successful update. Never remove offline data just because a remote mod is temporarily inaccessible.

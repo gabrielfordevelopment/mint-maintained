@@ -90,6 +90,39 @@ pub struct ModData {
 }
 
 impl ModData!["0.1.0"] {
+    pub fn validate(&self) -> Result<(), StateError> {
+        if !self.profiles.contains_key(&self.active_profile) {
+            return Err(StateError::InvalidModData {
+                message: format!("active profile {:?} does not exist", self.active_profile),
+            });
+        }
+        for (name, profile) in &self.profiles {
+            for entry in &profile.mods {
+                if let ModOrGroup::Group { group_name, .. } = entry
+                    && !self.groups.contains_key(group_name)
+                {
+                    return Err(StateError::InvalidModData {
+                        message: format!("profile {name:?} refers to missing group {group_name:?}"),
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn enabled_mods_ordered(&self, profile: &str) -> Result<Vec<ModSpecification>, StateError> {
+        self.validate()?;
+        if !self.profiles.contains_key(profile) {
+            return Err(StateError::InvalidModData {
+                message: format!("profile {profile:?} does not exist"),
+            });
+        }
+        let mut mods = Vec::new();
+        self.for_each_enabled_mod(profile, |mc| mods.push(mc.clone()));
+        mods.sort_by_key(|mc| std::cmp::Reverse(mc.priority));
+        Ok(mods.into_iter().map(|mc| mc.spec).collect())
+    }
+
     pub fn for_each_mod_predicate<
         F: FnMut(&ModConfig),
         G: FnMut(bool /* mod group enabled? */) -> bool,
@@ -428,6 +461,8 @@ impl From<&VersionAnnotatedConfig> for MetaConfig {
 
 #[derive(Debug, Snafu)]
 pub enum StateError {
+    #[snafu(display("invalid mod_data.json: {message}. The original file has been preserved"))]
+    InvalidModData { message: String },
     #[snafu(display("failed to deserialize user config"))]
     CfgDeserializationFailed { source: serde_json::Error },
     #[snafu(display("unsupported config version"))]
@@ -462,12 +497,12 @@ impl State {
         let config_path = dirs.config_dir.join("config.json");
 
         let config = read_config_or_default(&config_path)?;
-        let config = ConfigWrapper::<VersionAnnotatedConfig>::new(&config_path, config);
-        config.save()?;
-
         let legacy_mod_profiles_path = dirs.config_dir.join("profiles.json");
         let mod_data_path = dirs.config_dir.join("mod_data.json");
         let mod_data = read_mod_data_or_default(&mod_data_path, legacy_mod_profiles_path)?;
+
+        let config = ConfigWrapper::<VersionAnnotatedConfig>::new(&config_path, config);
+        config.save()?;
         let mod_data = ConfigWrapper::<VersionAnnotatedModData>::new(mod_data_path, mod_data);
         mod_data.save()?;
 
@@ -534,6 +569,7 @@ fn read_mod_data_or_default(
         },
     };
 
+    mod_data.validate()?;
     Ok(mod_data)
 }
 

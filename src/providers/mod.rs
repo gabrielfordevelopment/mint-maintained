@@ -71,11 +71,12 @@ pub trait ModProvider: Send + Sync {
 
 #[derive(Debug, Snafu)]
 pub enum ProviderError {
-    #[snafu(display("failed to initialize provider {id} with parameters {parameters:?}"))]
-    InitProviderFailed {
-        id: &'static str,
-        parameters: HashMap<String, String>,
-    },
+    #[snafu(display("failed to initialize provider {id}; check its settings"))]
+    InitProviderFailed { id: &'static str },
+    #[snafu(display("failed to save provider cache at {}: {message}", path.display()))]
+    CacheSaveFailed { path: PathBuf, message: String },
+    #[snafu(display("some cached mods could not be refreshed:\n{failures}"))]
+    PartialUpdate { failures: String },
     #[snafu(transparent)]
     CacheError { source: CacheError },
     #[snafu(transparent)]

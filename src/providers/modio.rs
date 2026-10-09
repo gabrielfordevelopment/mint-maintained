@@ -15,6 +15,9 @@ use tracing::*;
 
 use crate::providers::*;
 
+#[cfg(test)]
+mod reliability_tests;
+
 static RE_MOD: OnceLock<regex::Regex> = OnceLock::new();
 fn re_mod() -> &'static regex::Regex {
     RE_MOD.get_or_init(|| regex::Regex::new("^https://mod\\.io/g/drg/m/(?P<name_id>[^/#]+)/?(?:#(?:(?P<mod_id>\\d+)(?:/(?P<modfile_id>\\d+))?|[a-z]+))?$").unwrap())
@@ -182,26 +185,34 @@ impl Middleware for LoggingMiddleware {
         extensions: &mut Extensions,
         next: Next<'_>,
     ) -> reqwest_middleware::Result<Response> {
-        loop {
+        for attempt in 0..3 {
             info!(
                 "request started {} {:?}",
                 self.requests
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
                 req.url().path()
             );
-            let res = next.clone().run(req.try_clone().unwrap(), extensions).await;
+            let Some(request) = req.try_clone() else {
+                return next.run(req, extensions).await;
+            };
+            let res = next.clone().run(request, extensions).await;
             if let Ok(res) = &res
+                && matches!(res.status().as_u16(), 429 | 503)
+                && attempt < 2
                 && let Some(retry) = res.headers().get("retry-after")
+                && let Some(seconds) = retry
+                    .to_str()
+                    .ok()
+                    .and_then(|value| value.parse::<u64>().ok())
+                && (1..=30).contains(&seconds)
             {
-                info!("retrying after: {}...", retry.to_str().unwrap());
-                tokio::time::sleep(tokio::time::Duration::from_secs(
-                    retry.to_str().unwrap().parse::<u64>().unwrap(),
-                ))
-                .await;
+                info!("retrying after {seconds} seconds");
+                tokio::time::sleep(tokio::time::Duration::from_secs(seconds)).await;
                 continue;
             }
             return res;
         }
+        unreachable!("the final attempt always returns its response")
     }
 }
 
@@ -829,7 +840,7 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
     }
 
     async fn update_cache(&self, cache: ProviderCache) -> Result<(), ProviderError> {
-        use futures::stream::{self, StreamExt, TryStreamExt};
+        use futures::stream::{self, StreamExt};
 
         let now = SystemTime::now();
 
@@ -867,10 +878,8 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
             .filter_map(|id| name_map.get(id).map(|name| format_spec(name, *id, None)))
             .collect::<HashSet<_>>();
 
-        let mut mods_map = HashMap::new();
-
-        // used to deduplicate dependencies from mods already present in the mod list
-        let mut precise_mod_specs = HashSet::new();
+        let mut attempted = HashSet::new();
+        let mut failures = Vec::new();
 
         pub async fn resolve_mod<M: DrgModio>(
             prov: &ModioProvider<M>,
@@ -889,29 +898,42 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
         }
 
         while !to_resolve.is_empty() {
-            for (u, m) in stream::iter(
-                to_resolve
-                    .iter()
-                    .map(|u| resolve_mod(self, cache.clone(), u.to_owned())),
-            )
+            let batch: Vec<_> = to_resolve
+                .drain()
+                .filter(|spec| attempted.insert(spec.clone()))
+                .collect();
+            for (spec, result) in stream::iter(batch.into_iter().map(|spec| {
+                let cache = cache.clone();
+                async move {
+                    let result = resolve_mod(self, cache, spec.clone()).await;
+                    (spec, result)
+                }
+            }))
             .boxed()
             .buffer_unordered(5)
-            .try_collect::<Vec<_>>()
-            .await?
+            .collect::<Vec<_>>()
+            .await
             {
-                precise_mod_specs.insert(m.spec.clone());
-                mods_map.insert(u, m);
-                to_resolve.clear();
-                for m in mods_map.values() {
-                    for d in &m.suggested_dependencies {
-                        if !precise_mod_specs.contains(d) {
-                            to_resolve.insert(d.clone());
-                        }
+                match result {
+                    Ok((_, info)) => {
+                        attempted.insert(info.spec.clone());
+                        to_resolve.extend(
+                            info.suggested_dependencies
+                                .into_iter()
+                                .filter(|dep| !attempted.contains(dep)),
+                        );
                     }
+                    Err(error) => failures.push(format!("{}: {error}", spec.url)),
                 }
             }
         }
 
+        if !failures.is_empty() {
+            failures.sort();
+            return Err(ProviderError::PartialUpdate {
+                failures: failures.join("\n"),
+            });
+        }
         let mut lock = cache.write().unwrap();
         let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
         c.last_update_time = Some(now);
