@@ -1,5 +1,8 @@
 pub mod config;
 
+#[cfg(test)]
+mod persistence_tests;
+
 use std::{
     collections::{BTreeMap, HashMap},
     ops::{Deref, DerefMut},
@@ -460,13 +463,13 @@ impl State {
 
         let config = read_config_or_default(&config_path)?;
         let config = ConfigWrapper::<VersionAnnotatedConfig>::new(&config_path, config);
-        config.save().unwrap();
+        config.save()?;
 
         let legacy_mod_profiles_path = dirs.config_dir.join("profiles.json");
         let mod_data_path = dirs.config_dir.join("mod_data.json");
         let mod_data = read_mod_data_or_default(&mod_data_path, legacy_mod_profiles_path)?;
         let mod_data = ConfigWrapper::<VersionAnnotatedModData>::new(mod_data_path, mod_data);
-        mod_data.save().unwrap();
+        mod_data.save()?;
 
         let store = ModStore::new(&dirs.cache_dir, &config.provider_parameters)?.into();
 
@@ -512,12 +515,8 @@ fn read_mod_data_or_default(
             .context(ModDataDeserializationFailedSnafu)?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             match fs::read(&legacy_mod_profiles_path) {
-                Ok(buf) => {
-                    let mod_data = serde_json::from_slice::<MaybeVersionedModData>(&buf)
-                        .context(LegacyProfilesDeserializationFailedSnafu)?;
-                    fs::remove_file(&legacy_mod_profiles_path)?;
-                    mod_data
-                }
+                Ok(buf) => serde_json::from_slice::<MaybeVersionedModData>(&buf)
+                    .context(LegacyProfilesDeserializationFailedSnafu)?,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                     MaybeVersionedModData::default()
                 }

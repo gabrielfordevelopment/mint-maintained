@@ -158,8 +158,23 @@ MINT data paths and the `mint` executable name are retained for compatibility.
 Create feature and fix branches from this repository's `develop` branch and target
 pull requests to `develop` here. The names `dev` and `development` also refer to
 `develop`; they are not separate branches. `master` remains the release branch.
-The previously submitted upstream PR branch is retained separately. Agent guidance
+The previous upstream contributions remain in the commit history. Agent guidance
 is in [AGENTS.md](AGENTS.md), including the repository's Git workflow skill.
+
+Architecture contracts cover [persistence](docs/architecture/persistence.md),
+[desktop UI and background work](docs/architecture/desktop-ui.md), and
+[game integration](docs/architecture/integration.md). For guidance/documentation
+changes, use Python 3.10 or newer to run `python scripts/check_agent_guidance.py`
+and `python -m unittest discover -s scripts/tests`; no Python packages are required.
+The same checks run in CI as `Agent guidance`.
+
+Both `develop` and `master` require a pull request, an up-to-date base, resolved
+review conversations, and successful Windows, Linux, and agent-guidance checks.
+These restrictions also apply to administrators; force pushes and deletion of
+these two branches are disabled. A separate approving reviewer is not required.
+
+Legacy `profiles.json` files are retained as recovery copies after migration.
+Once `mod_data.json` exists, it is authoritative and subsequent edits use that file.
 
 ## Releases
 

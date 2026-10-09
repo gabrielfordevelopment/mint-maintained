@@ -66,6 +66,8 @@ impl<C: ConfigTrait> std::ops::DerefMut for ConfigWrapper<C> {
 
 impl<C: ConfigTrait> Drop for ConfigWrapper<C> {
     fn drop(&mut self) {
-        self.save().unwrap();
+        if let Err(error) = self.save() {
+            tracing::error!(%error, "Failed to save configuration on drop");
+        }
     }
 }

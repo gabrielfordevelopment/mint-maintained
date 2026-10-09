@@ -78,6 +78,7 @@ Add a `Validation` section when relevant, listing checks actually run and materi
 ## Merge and release
 
 - Merge only when the user authorizes it. Verify the current PR head/base, intended diff, relevant review state, and required checks. A previous green run for another commit is insufficient.
+- Both `develop` and `master` require a PR, an up-to-date base, resolved conversations, and the GitHub Actions checks `check (ubuntu-22.04)`, `check (windows-2022)`, and `Agent guidance`. Administrator bypass, force-push, and branch deletion are disabled by policy; do not weaken protection to deliver a change. No second-person approval is required for the sole-maintainer workflow. Verify live settings before claiming enforcement.
 - Prefer merge commits to preserve individual commits, DCO trailers, and ancestry between `develop` and `master`. Do not silently switch to squash/rebase if repository settings disallow that method; explain the constraint and resolve it within the user's authorization.
 - After merging, verify the remote result. Update local branches only when doing so preserves local work. Do not delete task branches as an automatic side effect unless cleanup is authorized.
 - Release preparation, merging a release PR, pushing a tag, and publishing a release are distinct actions. A code merge does not authorize a version bump, tag, or publication.
