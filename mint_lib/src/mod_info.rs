@@ -69,8 +69,61 @@ impl ModSpecification {
         Self { url }
     }
     pub fn satisfies_dependency(&self, other: &ModSpecification) -> bool {
-        // TODO this hack works surprisingly well but is still a complete hack and should be replaced
-        self.url.starts_with(&other.url) || other.url.starts_with(&self.url)
+        if self.url == other.url {
+            return true;
+        }
+        fn identity(value: &str) -> Option<(String, Option<u64>, Option<u64>)> {
+            let url = reqwest::Url::parse(value).ok()?;
+            if url.scheme() != "https" || url.host_str()? != "mod.io" || url.query().is_some() {
+                return None;
+            }
+            let slug = url.path().strip_prefix("/g/drg/m/")?.trim_end_matches('/');
+            if slug.is_empty() || slug.contains('/') {
+                return None;
+            }
+            let mut ids = url.fragment().unwrap_or_default().split('/');
+            let id = ids.next().and_then(|id| id.parse().ok());
+            let file = ids.next().and_then(|id| id.parse().ok());
+            if ids.next().is_some() {
+                return None;
+            }
+            Some((slug.to_owned(), id, file))
+        }
+        match (identity(&self.url), identity(&other.url)) {
+            (Some((slug, id, file)), Some((other_slug, other_id, other_file))) => {
+                let same_mod = match (id, other_id) {
+                    (Some(id), Some(other_id)) => id == other_id,
+                    _ => slug == other_slug,
+                };
+                same_mod && other_file.is_none_or(|required| file == Some(required))
+            }
+            _ => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+    #[test]
+    fn dependency_identity_respects_slug_boundaries_and_pinned_versions() {
+        let spec = |tail: &str| ModSpecification::new(format!("https://mod.io/g/drg/m/{tail}"));
+        assert!(!spec("tool").satisfies_dependency(&spec("tool-extra")));
+        assert!(!spec("tool-extra").satisfies_dependency(&spec("tool")));
+        assert!(spec("tool#1/10").satisfies_dependency(&spec("tool#1")));
+        assert!(spec("renamed#1/10").satisfies_dependency(&spec("tool#1/10")));
+        assert!(!spec("tool#1/11").satisfies_dependency(&spec("tool#1/10")));
+        assert!(!spec("tool#1").satisfies_dependency(&spec("tool#1/10")));
+        assert!(!spec("tool#12").satisfies_dependency(&spec("tool#1")));
+        assert!(spec("tool/#description").satisfies_dependency(&spec("tool")));
+        for (left, right) in [
+            ("local.pak", "local.pak2"),
+            ("https://example.org/a", "https://example.org/ab"),
+        ] {
+            let left = ModSpecification::new(left.into());
+            assert!(left.satisfies_dependency(&left));
+            assert!(!left.satisfies_dependency(&ModSpecification::new(right.into())));
+        }
     }
 }
 

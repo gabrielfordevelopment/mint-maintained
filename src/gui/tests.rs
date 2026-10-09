@@ -640,3 +640,231 @@ fn settings_width_is_stable_when_notices_are_expanded_and_collapsed() {
         }
     }
 }
+
+#[test]
+fn failed_settings_save_reports_error_and_preserves_the_original_backup() {
+    let mut test = TestApp::new();
+    let path = test.app.state.dirs.config_dir.join("config.json");
+    let original = std::fs::read(&path).unwrap();
+    let backup = path.with_extension("backup");
+    std::fs::rename(&path, &backup).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    test.app.update_sorting_config(None, false);
+    assert!(matches!(
+        test.app.last_action.as_ref().unwrap().status,
+        LastActionStatus::Failure(_)
+    ));
+    assert_eq!(std::fs::read(backup).unwrap(), original);
+    std::fs::remove_dir(&path).unwrap();
+    test.app.update_sorting_config(Some(SortBy::Name), false);
+    let loaded = State::init(Dirs::from_path(test.directory.path()).unwrap()).unwrap();
+    assert!(matches!(
+        loaded.config.sorting_config.as_ref().unwrap().sort_category,
+        SortBy::Name
+    ));
+}
+
+#[test]
+fn error_details_are_copyable_redacted_and_do_not_enlarge_the_footer() {
+    for theme in [egui::ThemePreference::Light, egui::ThemePreference::Dark] {
+        let mut test = TestApp::new();
+        test.app.has_run_init = true;
+        test.app.state.config.drg_pak_path = None;
+        test.context.set_theme(theme);
+        test.app.state.config.provider_parameters.insert(
+            "fixture".into(),
+            [("oauth".into(), "fixture-private-value".into())].into(),
+        );
+        let details = format!(
+            "Could not install mods\n{}\nfixture-private-value",
+            "Detailed failure with affected mod and path. ".repeat(60)
+        );
+        test.app.last_action = Some(LastAction::failure(details));
+        let context = test.context.clone();
+        let mut frame = |events| {
+            context.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(900.0, 500.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| eframe::App::update(&mut test.app, ctx, &mut eframe::Frame::_new_kittest()),
+            )
+        };
+        frame(vec![]);
+        let output = frame(vec![]);
+        assert!(button_rects(&output, "Open settings")[0].height() <= 20.0);
+        let pos = button_rects(&output, "Details")[0].center();
+        for pressed in [true, false] {
+            frame(vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]);
+        }
+        frame(vec![]);
+        let output = frame(vec![]);
+        let copy = button_rects(&output, "Copy error")[0].center();
+        frame(vec![
+            egui::Event::PointerMoved(copy),
+            egui::Event::PointerButton {
+                pos: copy,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]);
+        let output = frame(vec![egui::Event::PointerButton {
+            pos: copy,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        let copied = output
+            .platform_output
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                egui::OutputCommand::CopyText(text) => Some(text),
+                _ => None,
+            })
+            .expect("Copy error must populate the clipboard");
+        assert!(copied.contains("[redacted]"));
+        assert!(!copied.contains("fixture-private-value"));
+        assert!(copied.len() > 2000);
+    }
+}
+
+#[test]
+fn startup_error_keeps_malformed_data_and_allows_retry_after_repair() {
+    let directory = tempfile::tempdir().unwrap();
+    let dirs = Dirs::from_path(directory.path()).unwrap();
+    let data = dirs.config_dir.join("mod_data.json");
+    std::fs::write(&data, "{broken fixture").unwrap();
+    let context = egui::Context::default();
+    context.enable_accesskit();
+    let mut app = StartupApp::new(
+        &eframe::CreationContext::_new_kittest(context.clone()),
+        dirs,
+        None,
+    );
+    assert!(app.app.is_none());
+    assert_eq!(std::fs::read_to_string(&data).unwrap(), "{broken fixture");
+    std::fs::write(
+        &data,
+        serde_json::to_vec(&crate::state::VersionAnnotatedModData::default()).unwrap(),
+    )
+    .unwrap();
+    let mut frame = |events| {
+        context.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 500.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ctx| eframe::App::update(&mut app, ctx, &mut eframe::Frame::_new_kittest()),
+        )
+    };
+    frame(vec![]);
+    let output = frame(vec![]);
+    let pos = button_rects(&output, "Retry")[0].center();
+    for pressed in [true, false] {
+        frame(vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]);
+    }
+    assert!(app.app.is_some());
+}
+
+#[tokio::test]
+async fn cancel_button_keeps_installation_locked_until_the_worker_finishes() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    let mut test = TestApp::new();
+    test.app.has_run_init = true;
+    test.app.state.config.drg_pak_path = None;
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let worker_cancelled = cancelled.clone();
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let output_path = test.directory.path().join("should-not-be-written");
+    let output = output_path.clone();
+    let handle = tokio::spawn(async move {
+        tokio::task::spawn_blocking(move || {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            if !worker_cancelled.load(Ordering::Acquire) {
+                std::fs::write(output, b"incorrect completion").unwrap();
+            }
+        })
+        .await
+        .unwrap();
+    });
+    test.app.integrate_rid = Some(MessageHandle {
+        rid: test.app.request_counter.next(),
+        handle,
+        state: HashMap::new(),
+        cancellation: Some(cancelled.clone()),
+    });
+    started_rx.await.unwrap();
+    let context = test.context.clone();
+    let mut frame = |events| {
+        context.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 500.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ctx| eframe::App::update(&mut test.app, ctx, &mut eframe::Frame::_new_kittest()),
+        )
+    };
+    frame(vec![]);
+    let output = frame(vec![]);
+    let pos = button_rects(&output, "Cancel")[0].center();
+    for pressed in [true, false] {
+        frame(vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]);
+    }
+    assert!(cancelled.load(Ordering::Acquire));
+    assert!(test.app.integrate_rid.is_some());
+    assert!(
+        !test
+            .app
+            .integrate_rid
+            .as_ref()
+            .unwrap()
+            .handle
+            .is_finished()
+    );
+    release_tx.send(()).unwrap();
+    test.app.integrate_rid.take().unwrap().handle.await.unwrap();
+    assert!(!output_path.exists());
+}

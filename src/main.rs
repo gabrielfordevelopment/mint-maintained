@@ -216,10 +216,7 @@ async fn action_integrate_profile(dirs: Dirs, action: ActionIntegrateProfile) ->
     let game_pak_path = get_pak_path(&state, &action.fsd_pak)?;
     debug!(?game_pak_path);
 
-    let mut mods = Vec::new();
-    state.mod_data.for_each_enabled_mod(&action.profile, |mc| {
-        mods.push(mc.spec.clone());
-    });
+    let mods = state.mod_data.enabled_mods_ordered(&action.profile)?;
 
     resolve_unordered_and_integrate_with_provider_init(
         game_pak_path,

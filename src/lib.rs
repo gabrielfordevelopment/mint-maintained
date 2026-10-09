@@ -38,7 +38,7 @@ pub enum MintError {
     InvalidDrgPak { path: String },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Dirs {
     pub config_dir: PathBuf,
     pub cache_dir: PathBuf,
@@ -138,7 +138,7 @@ pub async fn resolve_unordered_and_integrate<P: AsRef<Path>>(
         .collect::<Vec<_>>();
 
     info!("fetching mods...");
-    let paths = state.store.fetch_mods(&urls, update, None).await?;
+    let paths = state.store.fetch_mods_ordered(&urls, update, None).await?;
 
     integrate::integrate(
         game_path,
@@ -191,7 +191,7 @@ pub async fn resolve_ordered(
     let urls = resolve_into_urls(state, mod_specs).await?;
     Ok(state
         .store
-        .fetch_mods(&urls.iter().collect::<Vec<_>>(), false, None)
+        .fetch_mods_ordered(&urls.iter().collect::<Vec<_>>(), false, None)
         .await?)
 }
 

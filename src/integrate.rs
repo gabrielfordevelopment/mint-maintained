@@ -1,6 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{BufReader, BufWriter, Cursor, ErrorKind, Read, Seek, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+
+mod transaction;
+use transaction::{StagedFile, check_cancelled, commit_files, lock_installation};
 
 use fs_err as fs;
 
@@ -45,6 +49,8 @@ pub fn uninstall<P: AsRef<Path>>(path_pak: P, modio_mods: HashSet<u32>) -> Resul
     let installation = DRGInstallation::from_pak_path(path_pak)
         .whatever_context("failed to get DRG installation")?;
     let path_mods_pak = installation.paks_path().join("mods_P.pak");
+    let _lock = lock_installation(&installation.paks_path())
+        .whatever_context("another installation operation is running")?;
     match fs::remove_file(&path_mods_pak) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
@@ -154,6 +160,8 @@ static INTEGRATION_DIR: include_dir::Dir<'_> =
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub(crate)))]
 pub enum IntegrationError {
+    #[snafu(display("Installation cancelled. The previous installation was preserved"))]
+    Cancelled,
     #[snafu(display("unable to determine DRG installation at provided path {}", path.display()))]
     DrgInstallationNotFound { path: PathBuf },
     #[snafu(transparent)]
@@ -222,12 +230,23 @@ pub fn integrate<P: AsRef<Path>>(
     config: MetaConfig,
     mods: Vec<(ModInfo, PathBuf)>,
 ) -> Result<(), IntegrationError> {
+    integrate_with_cancel(path_pak, config, mods, &AtomicBool::new(false))
+}
+
+pub(crate) fn integrate_with_cancel<P: AsRef<Path>>(
+    path_pak: P,
+    config: MetaConfig,
+    mods: Vec<(ModInfo, PathBuf)>,
+    cancelled: &AtomicBool,
+) -> Result<(), IntegrationError> {
+    check_cancelled(cancelled)?;
     let Ok(installation) = DRGInstallation::from_pak_path(&path_pak) else {
         return Err(IntegrationError::DrgInstallationNotFound {
             path: path_pak.as_ref().to_path_buf(),
         });
     };
     let path_mod_pak = installation.paks_path().join("mods_P.pak");
+    let _lock = lock_installation(&installation.paks_path())?;
 
     let mut fsd_pak_reader = BufReader::new(fs::File::open(path_pak.as_ref())?);
     let fsd_pak = repak::PakBuilder::new().reader(&mut fsd_pak_reader)?;
@@ -241,10 +260,10 @@ pub fn integrate<P: AsRef<Path>>(
     impl RawAsset {
         fn parse(&self) -> Result<Asset<Cursor<&Vec<u8>>>, IntegrationError> {
             Ok(AssetBuilder::new(
-                Cursor::new(self.uasset.as_ref().unwrap()),
+                Cursor::new(self.uasset.as_ref().ok_or_else(|| IntegrationError::GenericError { msg: "Required game asset is missing. Verify the selected game pak and game version.".into() })?),
                 EngineVersion::VER_UE4_27,
             )
-            .bulk(Cursor::new(self.uexp.as_ref().unwrap()))
+            .bulk(Cursor::new(self.uexp.as_ref().ok_or_else(|| IntegrationError::GenericError { msg: "Required game asset payload is missing. Verify the selected game pak and game version.".into() })?))
             .build()?)
         }
     }
@@ -283,6 +302,7 @@ pub fn integrate<P: AsRef<Path>>(
 
     // collect assets from game pak file
     for (path, asset) in &mut deferred_assets {
+        check_cancelled(cancelled)?;
         // TODO repak should return an option...
         asset.uasset = match fsd_pak.get(&format!("{path}.uasset"), &mut fsd_pak_reader) {
             Ok(file) => Ok(Some(file)),
@@ -296,31 +316,11 @@ pub fn integrate<P: AsRef<Path>>(
         }?;
     }
 
+    let mut staged_pak = StagedFile::new(path_mod_pak.clone())?;
     let mut bundle = ModBundleWriter::new(
-        BufWriter::new(
-            fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(&path_mod_pak)?,
-        ),
+        BufWriter::new(staged_pak.file.as_file_mut()),
         &fsd_pak.files(),
     )?;
-
-    #[cfg(feature = "hook")]
-    {
-        let path_hook_dll = installation
-            .binaries_directory()
-            .join(installation.installation_type.hook_dll_name());
-        let hook_dll = include_bytes!(env!("CARGO_CDYLIB_FILE_HOOK_hook"));
-        if path_hook_dll
-            .metadata()
-            .map(|m| m.len() != hook_dll.len() as u64)
-            .unwrap_or(true)
-        {
-            fs::write(&path_hook_dll, hook_dll)?;
-        }
-    }
 
     let mut init_spacerig_assets = HashSet::new();
     let mut init_cave_assets = HashSet::new();
@@ -328,6 +328,7 @@ pub fn integrate<P: AsRef<Path>>(
     let mut added_paths = HashSet::new();
 
     for (mod_info, path) in &mods {
+        check_cancelled(cancelled)?;
         let raw_mod_file = fs::File::open(path).with_context(|_| CtxtIoSnafu {
             mod_info: mod_info.clone(),
         })?;
@@ -367,6 +368,7 @@ pub fn integrate<P: AsRef<Path>>(
             .collect::<Result<HashMap<_, _>, _>>()?;
 
         for (normalized, pak_path) in &pak_files {
+            check_cancelled(cancelled)?;
             match normalized.extension() {
                 Some("uasset" | "umap")
                     if pak_files.contains_key(&normalized.with_extension("uexp")) =>
@@ -411,6 +413,7 @@ pub fn integrate<P: AsRef<Path>>(
         }
 
         for (normalized, pak_path) in pak_files {
+            check_cancelled(cancelled)?;
             let lowercase = normalized.as_str().to_ascii_lowercase();
             if added_paths.contains(&lowercase) {
                 continue;
@@ -465,6 +468,7 @@ pub fn integrate<P: AsRef<Path>>(
     let mut patch_deferred = |path_str: &str,
                               f: fn(&mut _) -> Result<(), IntegrationError>|
      -> Result<(), IntegrationError> {
+        check_cancelled(cancelled)?;
         let mut asset = deferred_assets[path_str].parse()?;
         f(&mut asset)?;
         bundle.write_asset(asset, path_str)
@@ -482,6 +486,7 @@ pub fn integrate<P: AsRef<Path>>(
     collect_dir_files(&INTEGRATION_DIR, &mut int_files);
 
     for (path, data) in &int_files {
+        check_cancelled(cancelled)?;
         bundle.write_file(data, path)?;
     }
 
@@ -494,6 +499,19 @@ pub fn integrate<P: AsRef<Path>>(
     bundle.write_file(&buf, ar_path)?;
 
     bundle.finish()?;
+
+    let mut outputs = vec![staged_pak];
+    #[cfg(feature = "hook")]
+    {
+        let destination = installation
+            .binaries_directory()
+            .join(installation.installation_type.hook_dll_name());
+        let hook = include_bytes!(env!("CARGO_CDYLIB_FILE_HOOK_hook"));
+        let mut staged_hook = StagedFile::new(destination)?;
+        staged_hook.file.write_all(hook)?;
+        outputs.push(staged_hook);
+    }
+    commit_files(outputs, cancelled)?;
 
     info!(
         "{} mods installed to {}",
@@ -630,7 +648,7 @@ impl<W: Write + Seek> ModBundleWriter<W> {
     }
 
     fn finish(self) -> Result<(), IntegrationError> {
-        self.pak_writer.write_index()?;
+        self.pak_writer.write_index()?.flush()?;
         Ok(())
     }
 }

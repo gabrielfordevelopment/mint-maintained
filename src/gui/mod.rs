@@ -1,3 +1,4 @@
+mod diagnostics;
 mod find_string;
 mod icons;
 mod message;
@@ -68,10 +69,58 @@ pub fn gui(dirs: Dirs, args: Option<Vec<String>>) -> Result<(), MintError> {
     eframe::run_native(
         &format!("MINT Maintained {}", mint_lib::built_info::version()),
         options,
-        Box::new(|cc| Ok(Box::new(App::new(cc, dirs, args)?))),
+        Box::new(|cc| Ok(Box::new(StartupApp::new(cc, dirs, args)))),
     )
     .with_generic(|e| format!("{e}"))?;
     Ok(())
+}
+
+struct StartupApp {
+    app: Option<App>,
+    dirs: Dirs,
+    args: Option<Vec<String>>,
+    error: String,
+}
+
+impl StartupApp {
+    fn new(cc: &eframe::CreationContext, dirs: Dirs, args: Option<Vec<String>>) -> Self {
+        let result = App::new(cc, dirs.clone(), args.clone());
+        let (app, error) = match result {
+            Ok(app) => (Some(app), String::new()),
+            Err(error) => (None, diagnostics::error_details(&error)),
+        };
+        Self {
+            app,
+            dirs,
+            args,
+            error,
+        }
+    }
+}
+
+impl eframe::App for StartupApp {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if let Some(app) = &mut self.app {
+            app.update(ctx, frame);
+            return;
+        }
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("MINT could not load its saved data");
+            ui.label("Your files have not been reset. Back up the affected file before repairing it, then retry. For a write error, check folder permissions and whether another application has locked the file.");
+            ui.label(format!("Config: {}\nCache: {}", self.dirs.config_dir.display(), self.dirs.cache_dir.display()));
+            ui.horizontal(|ui| {
+                if ui.button("Open config folder").clicked() { let _ = opener::open(&self.dirs.config_dir); }
+                if ui.button("Open cache folder").clicked() { let _ = opener::open(&self.dirs.cache_dir); }
+                if ui.button("Retry").clicked() {
+                    match App::load(self.dirs.clone(), self.args.clone()) {
+                        Ok(app) => self.app = Some(app),
+                        Err(error) => self.error = diagnostics::error_details(&error),
+                    }
+                }
+            });
+            diagnostics::details_ui(ui, &self.error);
+        });
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -154,6 +203,7 @@ pub struct App {
     self_update_rid: Option<MessageHandle<SelfUpdateProgress>>,
     original_exe_path: Option<PathBuf>,
     problematic_mod_id: Option<u32>,
+    show_error_details: bool,
 }
 
 #[derive(Default)]
@@ -211,6 +261,10 @@ impl App {
         dirs: Dirs,
         args: Option<Vec<String>>,
     ) -> Result<Self, MintError> {
+        Self::load(dirs, args)
+    }
+
+    fn load(dirs: Dirs, args: Option<Vec<String>>) -> Result<Self, MintError> {
         let (tx, rx) = mpsc::channel(10);
         let state = State::init(dirs)?;
 
@@ -246,7 +300,43 @@ impl App {
             self_update_rid: None,
             original_exe_path: None,
             problematic_mod_id: None,
+            show_error_details: false,
         })
+    }
+
+    fn report_save(&mut self, result: Result<(), crate::state::StateError>) -> bool {
+        if let Err(error) = result {
+            self.last_action = Some(LastAction::failure(format!(
+                "Changes could not be saved. Keep the app open and correct the file permissions before trying again.\n{}",
+                diagnostics::error_details(&error)
+            )));
+            false
+        } else {
+            true
+        }
+    }
+
+    fn show_error_window(&mut self, ctx: &egui::Context) {
+        if let Some(LastAction {
+            status: LastActionStatus::Failure(details),
+            ..
+        }) = &mut self.last_action
+        {
+            *details = diagnostics::redact(
+                details,
+                self.state
+                    .config
+                    .provider_parameters
+                    .values()
+                    .flat_map(|parameters| parameters.values().cloned()),
+            );
+            if self.show_error_details {
+                egui::Window::new("Error details")
+                    .open(&mut self.show_error_details)
+                    .default_size([520.0, 280.0])
+                    .show(ctx, |ui| diagnostics::details_ui(ui, details));
+            }
+        }
     }
 
     fn ui_profile(&mut self, ui: &mut Ui, profile: &str) {
@@ -777,7 +867,7 @@ impl App {
         self.scroll_to_match = ctx.scroll_to_match;
 
         if ctx.needs_save {
-            self.state.mod_data.save().unwrap();
+            self.report_save(self.state.mod_data.save());
         }
     }
 
@@ -901,7 +991,7 @@ impl App {
                             .config
                             .provider_parameters
                             .insert(window.factory.id.to_string(), window.parameters);
-                        self.state.config.save().unwrap();
+                        self.report_save(self.state.config.save());
                         return;
                     }
                     Err(e) => {
@@ -1072,7 +1162,9 @@ impl App {
                                 if theme != old_theme {
                                     ui.memory_mut(|m| m.options.theme_preference = theme);
                                     config.gui_theme = GuiTheme::from_egui_theme(theme);
-                                    config.save().unwrap();
+                                    if let Err(error) = config.save() {
+                                        self.last_action = Some(LastAction::failure(diagnostics::error_details(&error)));
+                                    }
                                 }
                             });
                         });
@@ -1116,7 +1208,7 @@ impl App {
                     self.state.config.drg_pak_path = Some(PathBuf::from(
                         self.settings_window.take().unwrap().drg_pak_path,
                     ));
-                    self.state.config.save().unwrap();
+                    self.report_save(self.state.config.save());
                 }
             } else if !open {
                 self.settings_window = None;
@@ -1546,15 +1638,17 @@ impl App {
                                         });
                                     }
                             });
-                    } else {
+                    } else if self.lint_rid.is_some() {
                         ui.spinner();
                         ui.label("Lint report generating...");
+                    } else {
+                        ui.label("Lint report failed. See the error details and retry after correcting the problem.");
+                        if ui.button("Details").clicked() { self.show_error_details = true; }
                     }
                 });
 
             if !open {
                 self.lint_report_window = None;
-                self.lint_rid = None;
             }
         }
     }
@@ -1568,7 +1662,7 @@ impl App {
             sort_category,
             is_ascending,
         });
-        self.state.config.save().unwrap();
+        self.report_save(self.state.config.save());
     }
 }
 
@@ -1731,6 +1825,7 @@ impl eframe::App for App {
         self.show_settings(ctx);
         self.show_lints_toggle(ctx);
         self.show_lint_report(ctx);
+        self.show_error_window(ctx);
 
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
             let size = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
@@ -1774,20 +1869,18 @@ impl eframe::App for App {
                             }
 
                             if button.clicked() {
-                                let mut mod_configs = Vec::new();
-                                let mut mods = Vec::new();
                                 let active_profile = self.state.mod_data.active_profile.clone();
-                                self.state
-                                    .mod_data
-                                    .for_each_enabled_mod(&active_profile, |mc| {
-                                        mod_configs.push(mc.clone());
-                                    });
-
-                                mod_configs.sort_by_key(|k| -k.priority);
-
-                                for config in mod_configs {
-                                    mods.push(config.spec.clone());
-                                }
+                                let mods =
+                                    match self.state.mod_data.enabled_mods_ordered(&active_profile)
+                                    {
+                                        Ok(mods) => mods,
+                                        Err(error) => {
+                                            self.last_action = Some(LastAction::failure(
+                                                diagnostics::error_details(&error),
+                                            ));
+                                            return;
+                                        }
+                                    };
 
                                 self.last_action = None;
                                 self.integrate_rid = Some(message::Integrate::send(
@@ -1849,14 +1942,21 @@ impl eframe::App for App {
                             )
                             .clicked()
                         {
-                            message::UpdateCache::send(self);
+                            message::UpdateCache::send(self, ctx);
                             self.problematic_mod_id = None;
                         }
                     },
                 );
-                if self.integrate_rid.is_some() {
-                    if ui.button("Cancel").clicked() {
-                        self.integrate_rid.take().unwrap().handle.abort();
+                if let Some(integration) = &self.integrate_rid {
+                    let cancelled = integration.cancellation.as_ref().unwrap();
+                    if ui
+                        .add_enabled(
+                            !cancelled.load(std::sync::atomic::Ordering::Acquire),
+                            egui::Button::new("Cancel"),
+                        )
+                        .clicked()
+                    {
+                        cancelled.store(true, std::sync::atomic::Ordering::Release);
                     }
                     ui.spinner();
                 }
@@ -1911,7 +2011,19 @@ impl eframe::App for App {
                             }
                         };
                         ui.ctx().request_repaint(); // for continuously updating time
-                        ui.label(format!("({}): {}", last_action.timeago(), msg));
+                        if matches!(last_action.status, LastActionStatus::Failure(_))
+                            && ui.button("Details").clicked()
+                        {
+                            self.show_error_details = true;
+                        }
+                        ui.add(
+                            egui::Label::new(format!(
+                                "({}): {}",
+                                last_action.timeago(),
+                                msg.lines().next().unwrap_or_default()
+                            ))
+                            .truncate(),
+                        );
                     }
                 });
             });
@@ -1952,7 +2064,7 @@ impl eframe::App for App {
                 self.state.mod_data.deref_mut().deref_mut(),
                 Some(buttons),
             ) {
-                self.state.mod_data.save().unwrap();
+                self.report_save(self.state.mod_data.save());
             }
 
             ui.separator();
