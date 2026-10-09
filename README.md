@@ -155,15 +155,21 @@ cargo run --locked -- --appdata ../mint-maintained-dev-data
 Using `--appdata` keeps development profiles separate from regular app data. Existing
 MINT data paths and the `mint` executable name are retained for compatibility.
 
-Create feature branches from this repository's `master` and target pull requests here.
-The previously submitted upstream PR branch is retained separately.
+Create feature and fix branches from this repository's `develop` branch and target
+pull requests to `develop` here. The names `dev` and `development` also refer to
+`develop`; they are not separate branches. `master` remains the release branch.
+The previously submitted upstream PR branch is retained separately. Agent guidance
+is in [AGENTS.md](AGENTS.md), including the repository's Git workflow skill.
 
 ## Releases
 
 The Release workflow builds Windows and Linux ZIP archives. A manual run produces
 downloadable workflow artifacts without publishing a release. For a public release,
-update the workspace version and changelog on `master`, then push a matching `vX.Y.Z`
-tag. Tag builds create a draft GitHub release after both platform builds succeed;
+prepare the workspace version and changelog on a task branch targeting `develop`,
+then promote the tested changes through a release PR from `develop` to `master`.
+Push a matching `vX.Y.Z` tag on the tested release commit on `master`. Tag builds
+verify that the commit is part of `master` and that the tag matches the workspace
+version, then create a draft GitHub release after both platform builds succeed;
 review the archives and publish the draft explicitly. Use a version above `0.2.10`
 for the first maintained release so existing version comparisons recognize it.
 

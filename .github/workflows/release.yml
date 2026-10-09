@@ -25,6 +25,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Check release branch
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          git fetch --no-tags origin master
+          if ($LASTEXITCODE -ne 0) { throw 'Could not fetch the release branch.' }
+          git merge-base --is-ancestor HEAD FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Release tags must point to a commit on master.' }
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev gcc-mingw-w64 pkg-config
