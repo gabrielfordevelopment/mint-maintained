@@ -1,12 +1,25 @@
-This version of Mint fixes these issues:
+# MINT Maintained
+
+An independently maintained MINT mod manager for Deep Rock Galactic, maintained by
+[Gabriel](https://github.com/gabrielfordevelopment).
+
+This project continues [Trumank's MINT](https://github.com/trumank/mint) and
+[Wasserkleber's mintfixed](https://github.com/Wasserkleber/mintfixed). Credit for the
+original application and inherited fixes belongs to their authors and contributors.
+The original license and commit history are preserved.
+
+Development, issues, and releases are managed in this repository. The GitHub fork
+relationship records the project's origin; releases do not depend on upstream approval.
+
+This version includes grouped-profile sorting fixes, missing-metadata regression tests,
+and compact UI improvements with Material Symbols SVG icons. It also retains these
+fixes from mintfixed:
 - Fixed HTTP 403 errors (mod lookup) by removing the deprecated `visible` filter from mod.io API requests.
 - Fixed HTTP 403 errors by replacing direct mod file metadata requests (`GET /mods/{id}/files/{file_id}`) with filtered list queries, restoring mod downloads.
 - Limits the mission selector/server browser mod list to 100 entries, preventing hosting/invites from breaking when the mission selector mod list string becomes too large.
 - Updated Trumans Repaker to make mods that need oodle compression work again automatically without needing to manually add a DLL (for example: https://mod.io/g/drg/m/missions-hud)
 
-If you'd like to build it yourself from the original mint-repo, take a look at my commits to see the fixes I implemented.
-
-# mint
+## Overview
 
 3rd party mod integration tool for Deep Rock Galactic to download and integrate mods completely
 externally of the game. This enables more stable mod usage as well as offline mod usage. Works for
@@ -27,19 +40,23 @@ when prompted.
 Most mods work just as if they were loaded via the official integration, but there are still some
 behavioural differences. If a mod is crashing or otherwise behaving differently than when using the
 official integration, *please* create an
-[issue](https://github.com/trumank/mint/issues/new) so it can be addressed.
+[issue](https://github.com/gabrielfordevelopment/mint-maintained/issues/new) so it can be addressed.
 
-For more details, please consult our [user guide](https://github.com/trumank/mint/wiki).
+The [original MINT user guide](https://github.com/trumank/mint/wiki) is useful background;
+some details and the inherited screenshots below may differ from this maintained version.
 
 ## Usage
 
 This section assumes that you are on Windows and is using the steam version of DRG, working with
 either local `.pak`s or mod.io mods.
 
-First, download the [latest release](https://github.com/trumank/mint/releases/latest)
+Download a build from this repository's [releases](https://github.com/gabrielfordevelopment/mint-maintained/releases)
 compatible with your architecture. For windows, this will be the
 `mint-x86_64-pc-windows-msvc.zip`. Extract this to anywhere you'd like to keep the
 executable.
+
+The first MINT Maintained release has not been published yet. Until then, build from
+source using the instructions below. Update checks and downloads target this repository.
 
 Then, we'll need to perform some first-time setup.
 
@@ -117,3 +134,38 @@ closed.**
 
 If you want to go back to the integrated mod support again, you must uninstall the mods installed by
 mint. Then, launch the game normally.
+
+## Development
+
+Install Rust through rustup and the native build tools for your platform. This project
+uses the nightly toolchain specified in `rust-toolchain.toml`.
+
+On Windows, use Visual Studio 2022 Build Tools with Desktop development with C++ and
+a Windows SDK, and run Cargo from its x64 Developer PowerShell. On Linux, install
+`libgtk-3-dev`, `gcc-mingw-w64`, and `pkg-config`.
+
+```sh
+cargo fmt -- --check
+cargo test --locked -p mint -p mint_lib
+cargo clippy --locked --all-features --all-targets -- -D warnings
+cargo build --locked
+cargo run --locked -- --appdata ../mint-maintained-dev-data
+```
+
+Using `--appdata` keeps development profiles separate from regular app data. Existing
+MINT data paths and the `mint` executable name are retained for compatibility.
+
+Create feature branches from this repository's `master` and target pull requests here.
+The previously submitted upstream PR branch is retained separately.
+
+## Releases
+
+The Release workflow builds Windows and Linux ZIP archives. A manual run produces
+downloadable workflow artifacts without publishing a release. For a public release,
+update the workspace version and changelog on `master`, then push a matching `vX.Y.Z`
+tag. Tag builds create a draft GitHub release after both platform builds succeed;
+review the archives and publish the draft explicitly. Use a version above `0.2.10`
+for the first maintained release so existing version comparisons recognize it.
+
+Archives retain the `mint-<target>.zip` names expected by the updater and include the
+project license and third-party notices. No release is published by a normal branch push.

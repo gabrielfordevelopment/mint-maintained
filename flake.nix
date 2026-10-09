@@ -87,7 +87,7 @@
         meta = with lib; {
           description = "Deep Rock Galactic mod loader and integration";
           license = licenses.mit;
-          homepage = "https://github.com/trumank/mint";
+          homepage = "https://github.com/gabrielfordevelopment/mint-maintained";
           mainProgram = packageName;
         };
       };

@@ -1076,7 +1076,7 @@ fn patch<C: Seek + Read>(asset: &mut Asset<C>) -> Result<(), IntegrationError> {
     let is_modded = find_function("FSDIsModdedServer");
     let is_modded_sandbox = find_function("FSDIsModdedSandboxServer");
 
-    for (_pi, statements) in statements.iter_mut() {
+    for statements in statements.values_mut() {
         *statements = std::mem::take(statements)
             .into_iter()
             .filter_map(|s| patch_ismodded(is_modded, is_modded_sandbox, s))
@@ -1090,7 +1090,7 @@ fn patch_modding_tab<C: Seek + Read>(asset: &mut Asset<C>) -> Result<(), Integra
     let ver = AssetVersion::new_from(asset);
     let mut statements = extract_tracked_statements(asset, ver, &None);
 
-    for (_pi, statements) in statements.iter_mut() {
+    for statements in statements.values_mut() {
         for statement in statements {
             walk(&mut statement.ex, &|ex| {
                 if let KismetExpression::ExSetArray(arr) = ex

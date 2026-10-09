@@ -637,9 +637,7 @@ async fn self_update_async(
     info!("downloading update");
 
     let response = client
-        .get(format!(
-            "https://github.com/trumank/mint/releases/latest/download/{asset_name}"
-        ))
+        .get(mint_lib::update::release_download_url(asset_name))
         .send()
         .await
         .map_err(Into::into)
