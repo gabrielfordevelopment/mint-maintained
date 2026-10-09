@@ -16,7 +16,7 @@ pub mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
 
     pub fn version() -> &'static str {
-        GIT_VERSION.unwrap()
+        env!("CARGO_PKG_VERSION")
     }
 }
 
@@ -210,6 +210,7 @@ pub fn setup_logging<P: AsRef<Path>>(
     debug!("tracing subscriber setup");
     info!("writing logs to {:?}", log_path.as_ref().display());
     info!("version: {}", built_info::version());
+    debug!("git build: {:?}", built_info::GIT_VERSION);
 
     Ok(guard)
 }

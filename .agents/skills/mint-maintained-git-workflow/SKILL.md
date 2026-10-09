@@ -16,13 +16,13 @@ Read the repository's [AGENTS.md](../../../AGENTS.md) for architecture, compatib
 
 ## Branch model
 
-- `develop` is the integration branch and the default target for ordinary PRs.
+- `develop` is the repository's default branch and the default target for all delivery and PRs. A general request to commit, push, or merge uses `develop` as the eventual PR destination, never the release branch. Perform only the delivery actions the user authorized; a commit-only request does not authorize a push or PR.
 - Interpret `dev`, `develop`, and `development` as the actual `develop` branch. These are aliases in conversation, not separate Git branches.
-- `master` contains release-ready history and keeps its existing name. Promote changes through a release PR from `develop` to `master`; release tags belong to tested commits on `master`.
-- Start ordinary work from the latest fetched `origin/develop`. Use descriptive English `feature/*`, `fix/*`, `docs/*`, `test/*`, `ci/*`, or `chore/*` names matching the task.
+- `master` contains release-ready history and keeps its existing name. When the user refers to the release branch as `main`, use the existing `master`; do not create or rename a branch. Target `master` only with explicit user authorization for that destination in the current task, through a release PR from `develop` or an explicitly requested hotfix PR. Release tags belong to tested commits on `master`.
+- Start ordinary work from the latest fetched `origin/develop`. Use a short English branch name with a task-based prefix: `feature/`, `fix/`, `chore/`, `docs/`, `refactor/`, `perf/`, `test/`, `ci/`, `build/`, `style/`, or `revert/`. Never use `codex/` or other agent/tool prefixes, even when an agent's default suggests them.
 - Create a new branch without tracking the base branch, for example `git switch --no-track -c fix/missing-metadata origin/develop`. On its first authorized push, set its upstream to the same-named branch on `origin`.
 - Continue an existing task branch when appropriate. Never reset, rebase, squash, amend, or force-push user history without explicit authorization. Use merge-based updates when an authorized task needs the current integration branch.
-- Do not commit routine changes directly to `develop` or `master`. An explicitly requested release hotfix may branch from `master`; bring the fix back to `develop` through an authorized merge/PR afterward.
+- Never commit directly to, merge locally into, or push directly to `develop` or `master`. All changes enter through GitHub PRs, including documentation, agent guidance, and version bumps. An explicitly requested release hotfix may branch from `master`; deliver it through a PR and bring it back to `develop` through another authorized PR.
 
 ## Initial develop setup
 
@@ -33,24 +33,24 @@ When the user authorizes the branch setup:
 1. Verify the own-repository remote, a suitable worktree state, and the exact history to preserve. Compare existing local and remote `master` and `develop` refs; do not overwrite an existing branch.
 2. Keep `master` unchanged and create `develop` from its accepted baseline unless existing refs require a different, reviewed integration. Retain unrelated task branches. For an explicitly local-only setup, use the verified local baseline and defer remote synchronization/publication.
 3. Create the setup task branch from local `develop` without tracking the base. Commit guidance and configuration there so they can later be reviewed in a PR to `develop`.
-4. Keep `release.toml` restricted to `master`, update development/release instructions in `README.md`, and inspect workflow branch filters and repository links. Tag-triggered release automation must verify that the release commit belongs to `master` and that the tag matches the Cargo version.
+4. Keep release automation restricted to `master`, update development/release instructions in `README.md`, and inspect workflow branch filters and repository links. The manual release workflow must use the committed Cargo version and one tested commit for checks, builds, and tagging.
 5. When remote setup is authorized, fetch and compare the current remote state before publishing. Push only to the own repository, establish matching tracking refs, and set `develop` as the GitHub default branch. Refresh `origin/HEAD` after the remote default changes.
 6. Keep `master` as the release branch. Do not rename/delete it or alter protection settings as part of this setup. Report the resulting local/remote branches and settings actually verified; documentation policy is not evidence that GitHub protection has been configured.
 
 ## Stage and commit
 
-1. Review the complete diff, including new files, for scope, accidental data/credentials, generated artifacts, dependency churn, and stale guidance. Stage only intended paths or hunks.
+1. Check `git branch --show-current` before every commit. Never commit on `develop` or `master`; move task changes to a task branch first. Review the complete diff, including new files, for scope, accidental data/credentials, generated artifacts, dependency churn, and stale guidance. Stage only intended paths or hunks.
 2. Complete the checks required by `AGENTS.md` for this change type. Inspect the staged diff and run `git diff --cached --check`. Resolve introduced failures without unrelated cleanup; report any environment limitation before claiming readiness.
 3. Use the existing configured human author identity. Add a DCO trailer with `git commit -s`; do not invent an identity or add an AI co-author trailer.
-4. Write an English, subject-only Conventional Commit message, with the DCO trailer as the exception. Keep the subject within 72 characters and describe the outcome, for example `fix: handle adjacent mods without metadata`.
+4. Write one short English Conventional Commit subject of at most 70 characters, counting the type, optional scope, punctuation, and spaces. Describe the outcome, for example `fix: handle adjacent mods without metadata`. Do not add a commit description, explanatory body, bullet list, or PR text. The required DCO sign-off trailer is the only exception to the subject-only format. Check the complete message before committing; apply the same format to merge commits and do not accept an automatically generated merge description.
 5. Verify the resulting commit, sign-off, branch, and remaining worktree changes. If the request is local-only, stop delivery here; do not push.
 
 ## Push and pull requests
 
 1. Recheck the push URL and branch immediately before an authorized push. Push the task branch explicitly to `origin`; never use an unqualified push when its destination is uncertain.
-2. Use an explicit repository for GitHub CLI/API calls, such as `gh pr create --repo gabrielfordevelopment/mint-maintained --base develop --head <branch>`. Target `master` only for an authorized release or hotfix PR.
+2. Use an explicit repository and base for GitHub CLI/API calls, such as `gh pr create --repo gabrielfordevelopment/mint-maintained --base develop --head <branch>`. Default to `develop` even when the user omits the destination. Target `master` only when the user explicitly requests that release-branch destination in the current task; a general delivery or merge request is insufficient.
 3. Inspect the full PR diff against its actual base. Include only the intended commits; resolve accidental branch ancestry before publishing.
-4. Use an English Conventional Commit-style title within 72 characters, describing the primary result. Write the body using the guidance below, with concrete changes and outcomes instead of a file inventory.
+4. Use a short, clear English Conventional Commit-style PR title of at most 70 characters, describing the primary result. Prefer a plain, concrete outcome over a list of implementation details. PR descriptions remain separate from commit messages: write the PR body using the guidance below, with concrete changes and outcomes instead of a file inventory.
 5. If the user approved a title/body, publish that exact wording unless they authorized an edit. Before updating an existing PR, read its current title/body and preserve user-added images, links, and notes. Do not replace them with an older local draft.
 6. Pass multiline text as a structured argument or an exact UTF-8 temporary file with `--body-file`. Avoid shell interpolation and escaped-newline corruption.
 7. Verify the remote head SHA, PR repository, base, head, title, and body after publication. If GitHub is briefly stale, recheck before attempting another write. Report the PR link and current CI status without treating queued jobs as passed.
@@ -82,10 +82,17 @@ Add a `Validation` section when relevant, listing checks actually run and materi
 - Prefer merge commits to preserve individual commits, DCO trailers, and ancestry between `develop` and `master`. Do not silently switch to squash/rebase if repository settings disallow that method; explain the constraint and resolve it within the user's authorization.
 - After merging, verify the remote result. Update local branches only when doing so preserves local work. Do not delete task branches as an automatic side effect unless cleanup is authorized.
 - Release preparation, merging a release PR, pushing a tag, and publishing a release are distinct actions. A code merge does not authorize a version bump, tag, or publication.
-- For an authorized release, inspect `Cargo.toml`, `Cargo.lock`, `CHANGELOG.md`, `release.toml`, and `.github/workflows/release.yml` together. Use the existing version/tag format; do not apply CompareCode's timestamp versioning.
-- Tag the verified, tested release commit on `master`. Confirm the tag/version match and the release workflow's master-ancestry guard before pushing a release tag.
-- Keep archive/executable names compatible with the updater: `mint-x86_64-pc-windows-msvc.zip` contains root `mint.exe`; `mint-x86_64-unknown-linux-gnu.zip` contains root `mint`. Preserve packaged licenses and notices.
-- Manual release-workflow runs currently produce artifacts; version tags produce draft releases. Re-read the workflow before use, and do not equate a draft with publication. If release-only changes landed on `master`, merge them back into `develop` through the authorized workflow.
+
+### Version preparation and manual release
+
+1. Inspect [Cargo.toml](../../../Cargo.toml), [Cargo.lock](../../../Cargo.lock), [CHANGELOG.md](../../../CHANGELOG.md), [release.yml](../../../.github/workflows/release.yml), and [scripts/release.py](../../../scripts/release.py). The single application version is `[workspace.package].version`; all four packages inherit it. The window title, CLI, logs, integration metadata, and update comparison use that Cargo version. Git build information is diagnostic only.
+2. For an authorized version bump, choose a stable `X.Y.Z` greater than the latest public release (and greater than `0.2.10` for the first maintained release). Prefer a patch increment for compatible fixes and a minor increment for a feature release. Do not bump on every commit, generate timestamp versions, or reset the fork's version to a lower value.
+3. Change the workspace version on a task branch from `develop`. Run `cargo check --offline -p mint_lib` without `--locked` to refresh the workspace entries in `Cargo.lock`; inspect the diff and exclude unrelated dependency changes. Final checks use `--locked` again. Add the version, date, and changes to `CHANGELOG.md`, retaining an Unreleased section and updating comparison links. Do not use `cargo release --execute` to commit or push onto a protected branch; the inherited `release.toml` is not the delivery procedure.
+4. Deliver the version preparation through a PR to `develop`, then promote it through an authorized release PR from `develop` to `master`. Both branches remain PR-only. Release-only changes on `master` must return through a PR to `develop`.
+5. Once the workflow is present on `master`, use **Actions > Release > Run workflow**, select **master**, and run it. No version input or manual tag push is needed. The run uses its fixed commit SHA, validates manifest/lockfile versions, reruns the shared Windows/Linux and script checks, then builds and packages both platforms before creating the matching tag and draft release. Branch pushes, merges, and tag pushes do not initiate a release.
+6. Versioned assets are `mint-vX.Y.Z-<target>.zip`. Identical `mint-<target>.zip` aliases remain for the updater; keep root `mint.exe` on Windows and `mint` on Linux, executable permissions, licenses, and notices. Do not remove or rename updater aliases independently of released-client compatibility.
+7. Existing releases, including drafts, are never overwritten. A tag pointing elsewhere is rejected. A matching tag without a release can be reused after a failed attempt. If an upload fails after a draft exists, inspect and repair that exact draft within the user's authorization rather than deleting or replacing it blindly.
+8. Review/test the downloaded packages and generated release notes, then explicitly publish the draft when authorized. A successful workflow uploads a draft; it does not publish it or expose it as the latest update. Report that distinction, and report unavailable platform/game tests honestly.
 
 ## Report delivery
 
