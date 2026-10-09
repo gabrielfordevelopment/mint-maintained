@@ -98,6 +98,8 @@ impl Default for MaybeVersionedCache {
 
 #[derive(Debug, Snafu)]
 pub enum CacheError {
+    #[snafu(display("unsupported cache.json version: {version}"))]
+    UnsupportedVersion { version: String },
     #[snafu(display("failed to read cache.json with provided path {}", search_path.display()))]
     CacheJsonReadFailed {
         source: std::io::Error,
@@ -156,7 +158,7 @@ pub(crate) fn read_cache_metadata_or_default(
                             })?,
                         }
                     }
-                    _ => unimplemented!(),
+                    _ => return Err(CacheError::UnsupportedVersion { version: vs }),
                 }
             } else {
                 // HACK: workaround a serde issue relating to flattening with tags involving
@@ -223,5 +225,54 @@ impl BlobCache {
     pub(super) fn get_path(&self, blob: &BlobRef) -> Option<PathBuf> {
         let path = self.path.join(&blob.0);
         path.exists().then_some(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_cache_version_is_an_error_and_preserves_the_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("cache.json");
+        let original = br#"{"version":"99.0.0","cache":{"future-data":[1,2,3]}}"#;
+        fs::write(&path, original).unwrap();
+
+        assert!(matches!(
+            crate::providers::ModStore::new(directory.path(), &HashMap::new()),
+            Err(crate::providers::ProviderError::CacheError {
+                source: CacheError::UnsupportedVersion { version }
+            }) if version == "99.0.0"
+        ));
+        assert_eq!(fs::read(path).unwrap(), original);
+    }
+
+    #[test]
+    fn cache_reader_supports_legacy_current_missing_and_invalid_data() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("cache.json");
+        assert!(read_cache_metadata_or_default(&path).is_ok());
+        assert!(!path.exists());
+
+        for original in [
+            r#"{"http":{"type":"HttpProviderCache","url_blobs":{"https://example.org/mod.pak":"abc"}}}"#,
+            r#"{"version":"0.0.0","cache":{"http":{"type":"HttpProviderCache","url_blobs":{"https://example.org/mod.pak":"abc"}}}}"#,
+        ] {
+            fs::write(&path, original).unwrap();
+            let cache = read_cache_metadata_or_default(&path).unwrap();
+            let value = serde_json::to_value(cache).unwrap();
+            assert_eq!(
+                value["cache"]["http"]["url_blobs"]["https://example.org/mod.pak"],
+                "abc"
+            );
+            assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        }
+
+        for original in ["{", "[]", r#"{"version":17}"#] {
+            fs::write(&path, original).unwrap();
+            assert!(read_cache_metadata_or_default(&path).is_err());
+            assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        }
     }
 }
