@@ -42,6 +42,10 @@ Partial imports preserve input order and keep errors available for retry; they a
 
 ## UI invariants
 
+[fonts.rs](../../src/gui/fonts.rs) appends an embedded Noto Sans CJK font to the proportional and monospace fallback chains at GUI initialization, including startup recovery and the live log. Default Latin glyphs and compact control sizes remain unchanged. Font coverage is independent of installed OS fonts and network access. The bundled pan-CJK font uses Simplified Chinese forms for shared Han characters; it does not add script shaping or bidirectional layout support to egui. Keep its pinned provenance, license in Settings and release-archive notice together. Unicode glyph, input/IME-event, search, highlighting and persistence regressions live in [unicode_text.rs](../../src/gui/tests/unicode_text.rs).
+
+Search validity and highlighted matches use the same Unicode-aware matcher in [find_string.rs](../../src/gui/find_string.rs), addressing the displayed mod name or the specification URL when metadata is unavailable. Case conversion must map highlights back to original UTF-8 boundaries; never slice original text with offsets into a transformed string. Search remains substring-based and does not promise transliteration or canonical-normalization equivalence.
+
 List rows use one logical pixel of vertical inner padding above and below their controls, with no horizontal padding. Apply the same padding to standalone rows, group headers and group members; keep control sizes unchanged.
 
 The compact row geometry and existing control placement are intentional. A visual correction does not authorize a layout redesign, larger rows, or a table header. Reuse the icon/control owner before adding another implementation. In both themes, add buttons are blue with white icons; delete icons and confirmation actions are red with white foregrounds. Hover and pressed states use darker fills. Preserve disabled styling, theme selection, focus and keyboard behavior.

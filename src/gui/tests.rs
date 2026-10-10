@@ -4,6 +4,7 @@ mod drag_drop;
 mod editing;
 mod group_colors;
 mod sorting_controls;
+mod unicode_text;
 use crate::providers::ModResolution;
 use crate::state::ModGroup;
 

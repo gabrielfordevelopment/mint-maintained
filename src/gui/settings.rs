@@ -245,9 +245,17 @@ impl App {
                     ui.collapsing("Third-party notices", |ui| {
                         egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
                             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-                            ui.label(include_str!("../../THIRD_PARTY_NOTICES.md"));
+                            let mut notices = LayoutJob::simple(
+                                include_str!("../../THIRD_PARTY_NOTICES.md").into(),
+                                egui::TextStyle::Body.resolve(ui.style()),
+                                ui.visuals().text_color(),
+                                ui.available_width(),
+                            );
+                            notices.wrap.break_anywhere = true;
+                            ui.add(egui::Label::new(notices).wrap());
                             ui.label(include_str!("../../assets/icons/LICENSE"));
                             ui.label(include_str!("../../assets/icons/DEPENDENCY_LICENSES.txt"));
+                            ui.label(include_str!("../../assets/fonts/OFL.txt"));
                         });
                     });
                 });

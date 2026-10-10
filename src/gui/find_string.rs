@@ -56,6 +56,10 @@ pub(crate) struct SearchJob {
     pub(crate) is_match: bool,
 }
 
+pub(crate) fn contains_case_insensitive(text: &str, query: &str) -> bool {
+    query.is_empty() || FindString::new(text, query).any(|(matched, _)| matched)
+}
+
 pub(crate) fn searchable_text(text: &str, search_string: &str, format: TextFormat) -> SearchJob {
     let mut job = LayoutJob::default();
     let mut is_match = false;
@@ -102,6 +106,35 @@ mod tests {
                 chunks.iter().map(|(_, part)| *part).collect::<String>(),
                 text
             );
+        }
+    }
+
+    #[test]
+    fn multilingual_highlights_keep_utf8_text_and_repeated_matches_intact() {
+        for (text, query, expected) in [
+            ("矿工中文矿工", "矿工", vec!["矿工", "矿工"]),
+            ("繁體中文", "體中", vec!["體中"]),
+            ("日本語のドワーフ", "ドワーフ", vec!["ドワーフ"]),
+            ("한국어 광부", "광부", vec!["광부"]),
+            ("Русский Шахтёр", "ШАХТЁР", vec!["Шахтёр"]),
+            ("Український Гірник", "гірник", vec!["Гірник"]),
+            ("İ矿工Рудар🙂", "РУДАР", vec!["Рудар"]),
+            ("中文🙂中文", "🙂", vec!["🙂"]),
+            ("日本語", "한국", vec![]),
+        ] {
+            let chunks: Vec<_> = FindString::new(text, query).collect();
+            assert_eq!(chunks.iter().map(|(_, s)| *s).collect::<String>(), text);
+            assert_eq!(
+                chunks
+                    .iter()
+                    .filter_map(|(matched, s)| matched.then_some(*s))
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            assert_eq!(contains_case_insensitive(text, query), !expected.is_empty());
+            let job = searchable_text(text, query, TextFormat::default());
+            assert_eq!(job.job.text, text);
+            assert_eq!(job.is_match, !expected.is_empty());
         }
     }
 }

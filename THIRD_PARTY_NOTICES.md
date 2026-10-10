@@ -1,5 +1,21 @@
 # UI asset and renderer notices
 
+## Unicode font fallback
+
+The desktop UI embeds the unmodified Noto Sans CJK SC Regular 2.004 font as a
+fallback for characters absent from egui's default fonts, including Chinese,
+Japanese and Korean. Copyright 2014-2021 Adobe (http://www.adobe.com/).
+It is distributed under the SIL Open Font License 1.1;
+the complete license is in `assets/fonts/OFL.txt` and embedded in Settings.
+
+Source: https://github.com/notofonts/noto-cjk
+Revision: `523d033d6cb47f4a80c58a35753646f5c3608a78` (`Sans2.004`)
+Upstream path: `Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf`
+SHA-256: `2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b`
+
+The font is compiled into the application; rendering does not require network
+access, system font installation, or an external file beside the executable.
+
 ## Desktop log and window support
 
 The live log uses Chrono 0.4.31 (MIT OR Apache-2.0) for readable UTC timestamps.

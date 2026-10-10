@@ -2,6 +2,7 @@ mod diagnostics;
 mod drag_drop;
 mod editing;
 mod find_string;
+mod fonts;
 mod group_colors;
 mod group_view;
 mod groups;
@@ -235,10 +236,11 @@ enum LastActionStatus {
 
 impl App {
     fn new(
-        _cc: &eframe::CreationContext,
+        cc: &eframe::CreationContext,
         dirs: Dirs,
         args: Option<Vec<String>>,
     ) -> Result<Self, MintError> {
+        fonts::install(&cc.egui_ctx);
         Self::load(dirs, args)
     }
 
@@ -798,13 +800,11 @@ impl eframe::App for App {
 
                 ui.add_space(16.);
                 let search_string = &mut self.search_string;
-                let lower = search_string.to_lowercase();
                 let any_matches = self.state.mod_data.any_mod(&profile, |mc, _| {
-                    self.state
-                        .store
-                        .get_mod_info(&mc.spec)
-                        .map(|i| i.name.to_lowercase().contains(&lower))
-                        .unwrap_or(false)
+                    self.state.store.get_mod_info(&mc.spec).map_or_else(
+                        || find_string::contains_case_insensitive(&mc.spec.url, search_string),
+                        |info| find_string::contains_case_insensitive(&info.name, search_string),
+                    )
                 });
 
                 let mut text_edit = egui::TextEdit::singleline(search_string)
