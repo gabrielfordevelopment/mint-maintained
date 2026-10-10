@@ -51,6 +51,19 @@ def read_version(root):
     return version
 
 
+def release_notes(root):
+    version = read_version(root)
+    changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    sections = re.split(r"^## \[([^\]]+)\][^\n]*\n", changelog, flags=re.MULTILINE)
+    matches = [sections[i + 1] for i in range(1, len(sections), 2) if sections[i] == version]
+    if len(matches) != 1:
+        raise ValueError(f"Expected one CHANGELOG.md section for {version}.")
+    notes = matches[0].split("<!-- next-url -->", 1)[0].strip()
+    if not notes:
+        raise ValueError(f"Release notes for {version} must not be empty.")
+    return notes
+
+
 def github_api(endpoint, data=None, missing_ok=False):
     repository = os.environ["GH_REPO"]
     request = Request(
@@ -140,6 +153,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("metadata")
+    commands.add_parser("notes")
     for command in ("check-remote", "create-tag"):
         commands.add_parser(command).add_argument("--commit", required=True)
     packaging = commands.add_parser("package")
@@ -150,6 +164,8 @@ def main():
     version = read_version(root)
     if args.command == "metadata":
         print(f"version={version}\ntag=v{version}")
+    elif args.command == "notes":
+        print(release_notes(root))
     elif args.command == "check-remote":
         check_remote(version, args.commit)
     elif args.command == "create-tag":

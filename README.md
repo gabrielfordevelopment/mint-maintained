@@ -188,7 +188,9 @@ Never commit or push directly to either shared branch.
 Once the workflow is on `master`, open **Actions > Release > Run workflow**, select
 **master**, and click **Run workflow**. It reads the committed version, runs the
 Windows/Linux and repository-script checks, builds both platforms, and creates
-the `vX.Y.Z` tag and a draft GitHub release with generated notes and ZIP downloads.
+the `vX.Y.Z` tag and a draft GitHub release with ZIP downloads and the matching
+version's notes from `CHANGELOG.md`. A missing or empty version section stops the
+workflow before building or creating a tag.
 All jobs use the same commit. No version input, manual tagging, or local build is
 needed. Review the packages and notes, then click **Publish release** when ready.
 

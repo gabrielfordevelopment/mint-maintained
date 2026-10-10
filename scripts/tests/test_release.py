@@ -75,6 +75,25 @@ class ReleaseFiles(unittest.TestCase):
                 release.stable_version(version)
         self.assertGreater(release.stable_version("0.2.11"), release.stable_version("0.2.9"))
 
+    def test_notes_include_only_the_workspace_version_and_preserve_markdown(self):
+        expected = "### Changes\n\n- Fix Cyrillic and CJK names: Шахтёр, 中文.\n- Keep [links](https://example.com)."
+        self.write("CHANGELOG.md", "# Changes\n\n## [Unreleased]\n\nFuture work\n\n"
+                   f"## [0.2.11] - 2026-10-10\n\n{expected}\n\n"
+                   "## [0.2.10] - 2023-08-18\n\nOlder changes\n")
+        self.assertEqual(release.release_notes(self.root), expected)
+
+    def test_notes_reject_missing_empty_and_duplicate_version_sections(self):
+        for contents in ("## [Unreleased]\n\nFuture work\n", "## [0.2.11]\n\n",
+                         "## [0.2.11]\nFirst\n## [0.2.11]\nSecond\n"):
+            with self.subTest(contents=contents), self.assertRaises(ValueError):
+                self.write("CHANGELOG.md", contents)
+                release.release_notes(self.root)
+
+    def test_last_version_notes_exclude_changelog_link_definitions(self):
+        self.write("CHANGELOG.md", "## [0.2.11]\n\n- Fix.\n\n<!-- next-url -->\n"
+                   "[0.2.11]: https://example.com\n")
+        self.assertEqual(release.release_notes(self.root), "- Fix.")
+
 
 class RemoteReleaseChecks(unittest.TestCase):
     def api(self, responses):
