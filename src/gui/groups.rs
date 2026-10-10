@@ -44,7 +44,7 @@ impl App {
                 ui.label("Drag mods onto a group in the list. Drag them back to the main list to move them out.");
                 ui.weak("Groups are shared across profiles.");
                 ui.add_space(6.0);
-                egui::CollapsingHeader::new("Manage shared groups").open(window.show_management.then_some(true)).show(ui, |ui| {
+                icons::collapsing_header("Manage shared groups").open(window.show_management.then_some(true)).show(ui, |ui| {
                     egui::ScrollArea::vertical().max_height(280.0).show(ui, |ui| {
                         for (name, group) in &self.state.mod_data.groups {
                             ui.push_id(name, |ui| {

@@ -3,6 +3,47 @@ use egui::{Color32, Image, Response, Ui, Vec2};
 pub const SIZE: f32 = 16.0;
 const CORNER_RADIUS: u8 = 3;
 
+pub fn app_icon() -> egui::IconData {
+    eframe::icon_data::from_png_bytes(include_bytes!(concat!(env!("OUT_DIR"), "/mint.png")))
+        .expect("Build-generated application icon must be valid PNG")
+}
+
+pub fn collapsing_header(text: impl Into<egui::WidgetText>) -> egui::CollapsingHeader {
+    egui::CollapsingHeader::new(text).icon(|ui, openness, response| {
+        paint_chevron(
+            ui,
+            response.rect,
+            ui.style().interact(response).fg_stroke.color,
+            openness * std::f32::consts::FRAC_PI_2,
+        );
+    })
+}
+
+pub fn combo_box(id_salt: impl std::hash::Hash) -> egui::ComboBox {
+    let animation_id = egui::Id::new(&id_salt).with("chevron");
+    egui::ComboBox::from_id_salt(id_salt).icon(move |ui, rect, visuals, open, _| {
+        let openness = ui
+            .ctx()
+            .animate_bool_responsive(ui.make_persistent_id(animation_id), open);
+        paint_chevron(
+            ui,
+            rect,
+            visuals.fg_stroke.color,
+            std::f32::consts::FRAC_PI_2 + openness * std::f32::consts::PI,
+        );
+    })
+}
+
+fn paint_chevron(ui: &Ui, rect: egui::Rect, color: Color32, angle: f32) {
+    Icon::ChevronRight
+        .image(ui, color)
+        .rotate(angle, Vec2::splat(0.5))
+        .paint_at(
+            ui,
+            egui::Rect::from_center_size(rect.center(), Vec2::splat(SIZE)),
+        );
+}
+
 #[derive(Clone, Copy)]
 pub enum Icon {
     Add,

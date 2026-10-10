@@ -38,7 +38,7 @@ use std::{
     path::PathBuf,
 };
 
-use eframe::egui::{CollapsingHeader, RichText};
+use eframe::egui::RichText;
 use eframe::epaint::{Pos2, Vec2};
 use eframe::{
     egui::{FontSelection, Layout, TextFormat, Ui},
@@ -81,6 +81,7 @@ use settings::{WindowProviderParameters, WindowSettings};
 pub fn gui(dirs: Dirs, args: Option<Vec<String>>) -> Result<(), MintError> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
+            .with_icon(icons::app_icon())
             .with_inner_size([900.0, 500.0])
             .with_drag_and_drop(true),
         ..Default::default()

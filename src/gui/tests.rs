@@ -1,5 +1,6 @@
 use super::sorting::sorted_mod_indices;
 use super::*;
+mod disclosure;
 mod drag_drop;
 mod editing;
 mod group_colors;

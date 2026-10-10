@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <title>Mint monogram</title>
+  <desc>A geometric M with two mountain-like peaks and a mint accent.</desc>
+  <rect width="64" height="64" rx="14" fill="#142825"/>
+  <path d="M12 48V16H21L32 31L43 16H52V48H42V33L32 46L22 33V48Z" fill="#65E6B6"/>
+  <path d="M43 16H52V48H42V33L32 46V31Z" fill="#C4FAE4"/>
+</svg>

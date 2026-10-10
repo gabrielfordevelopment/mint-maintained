@@ -1,5 +1,16 @@
 # UI asset and renderer notices
 
+## Application icon
+
+The MINT Maintained M monogram in `assets/brand/mint.svg` is original,
+code-authored vector artwork distributed under the repository's MIT OR Apache-2.0
+license. Build-generated PNG and ICO images are mechanical renders of that source.
+It is separate from the Google Material Symbols used for UI controls below.
+
+Windows resource embedding uses the build-only `winresource` crate under the
+MIT license: https://github.com/BenjaminRi/winresource.
+It is not linked into the application at runtime.
+
 ## Unicode font fallback
 
 The desktop UI embeds the unmodified Noto Sans CJK SC Regular 2.004 font as a

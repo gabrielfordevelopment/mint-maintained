@@ -24,9 +24,13 @@ The UI disables editing while conflicting background work or a confirmation is a
 
 ## Windows startup and diagnostics
 
+The application icon's canonical source is [assets/brand/mint.svg](../../assets/brand/mint.svg), an original code-authored M monogram. The root build script renders a 256-pixel PNG for the root viewport and a multi-resolution ICO (16 through 256 pixels) for the Windows executable resource. Generated assets stay in Cargo's output directory and are embedded; no external icon files are needed at runtime. Child viewports inherit the root icon. Edit the SVG instead of maintaining independent PNG/ICO copies. Windows builds require a working resource compiler (the Windows SDK on MSVC or windres on GNU targets); missing tooling fails the build rather than silently shipping the default icon.
+
 Group expansion belongs to [group_view.rs](../../src/gui/group_view.rs), separate from saved mod data. Newly created/attached groups and successful drop destinations open immediately. Hovering a mod over a closed group for 500 ms expands it temporarily; the entire visible group is the hover region. Leaving or cancelling restores the prior collapsed state, while a successful drop keeps it open. Already-open groups stay open.
 
 Group headers show the total member count beside the name, including disabled mods. The name, arrow and remaining header width toggle expansion on left click and open the shared context menu on right click. This target excludes the separate drag, delete and enable controls and the member rows.
+
+Use `icons::collapsing_header` for collapsible content sections (groups, notices, group management and lint reports) and `icons::combo_box` for selection dropdowns. Both reuse the cached `keyboard_arrow_right` SVG. Section arrows rotate continuously from right to down with egui's body expansion; dropdown arrows rotate from down to up while open. Keep widget IDs, compact geometry and existing interaction behavior stable.
 
 [group_colors.rs](../../src/gui/group_colors.rs) owns the 15-color theme-aware palette and the 5-by-3 color-dot picker in the group-header context menu. A group's header and left indentation gutter share its color; member rows retain normal alternating backgrounds. The selected dot has a ring and checkmark, with named hover/focus support. Color is a saved property of the shared group, so every referring profile displays the same choice. Gray is the default for old groups. Apply palette changes through the validated edit/save path without changing row geometry or drag targets.
 

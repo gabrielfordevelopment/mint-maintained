@@ -294,7 +294,7 @@ impl App {
                 }
 
                 if let Some(info) = &info {
-                    let dropdown = egui::ComboBox::from_id_salt("version")
+                    let dropdown = icons::combo_box("version")
                         .selected_text(
                             self.state
                                 .store
@@ -528,7 +528,7 @@ impl App {
                             {
                                 ctx.needs_save = true;
                             }
-                            let header = egui::CollapsingHeader::new(group_name.as_str())
+                            let header = icons::collapsing_header(group_name.as_str())
                                 .open(Some({
                                     let state = group_views.get(&profile_name, group_name);
                                     let hovering = can_drag
@@ -547,25 +547,6 @@ impl App {
                                     }
                                     state.open
                                 }))
-                                .icon(|ui, openness, response| {
-                                    Icon::ChevronRight
-                                        .image(ui, ui.visuals().text_color())
-                                        .rotate(
-                                            if openness > 0.5 {
-                                                std::f32::consts::FRAC_PI_2
-                                            } else {
-                                                0.0
-                                            },
-                                            egui::Vec2::splat(0.5),
-                                        )
-                                        .paint_at(
-                                            ui,
-                                            egui::Rect::from_center_size(
-                                                response.rect.center(),
-                                                egui::Vec2::splat(icons::SIZE),
-                                            ),
-                                        );
-                                })
                                 .show(ui, |ui| {
                                     let body_background = ui.painter().add(egui::Shape::Noop);
                                     let body_top = ui.cursor().top();

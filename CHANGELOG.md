@@ -4,6 +4,9 @@
 
 ## [Unreleased] - ReleaseDate
 
+- Replace the default egui icon with the MINT Maintained M monogram in application windows and the Windows executable.
+- Unify collapsible sections and selection dropdowns with animated SVG chevrons.
+
 ## [0.3.0] - 2026-10-10
 
 The first MINT Maintained release continues the work of Trumank's MINT and
