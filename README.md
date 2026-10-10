@@ -25,7 +25,7 @@ fixes from mintfixed:
 externally of the game. This enables more stable mod usage as well as offline mod usage. Works for
 both Steam and Microsoft Store versions.
 
-<img alt="Graphical User Interface" src="https://github.com/trumank/mint/assets/1144160/0305419f-a2af-4349-9d63-12e19d97102f">
+![MINT Maintained 0.4.0 in light mode with demo mods and multilingual groups](docs/images/mint-0.4.0-overview-light.png)
 
 Mods are added via URL to a .pak or .zip containing a .pak. Mods can also be pulled from mod.io.
 Examples:
@@ -43,7 +43,7 @@ official integration, *please* create an
 [issue](https://github.com/gabrielfordevelopment/mint-maintained/issues/new) so it can be addressed.
 
 The [original MINT user guide](https://github.com/trumank/mint/wiki) is useful background;
-some details and the inherited screenshots below may differ from this maintained version.
+some details and the external mod.io and in-game screenshots below may differ from current versions.
 
 ## Usage
 
@@ -66,7 +66,7 @@ We need to provide the tool with the path to `FSD-WindowsNoEditor.pak` and a mod
 you want to use mod.io mods. These can be configured in the settings menu (cogwheel located in the
 bottom toolbar).
 
-<img alt="Settings menu" src="https://github.com/trumank/mint/assets/1144160/b009a74c-b13a-4b84-95f9-4c59c6debb62">
+![MINT Maintained 0.4.0 settings in light mode using isolated demo data](docs/images/mint-0.4.0-settings-light.png)
 
 #### Locating the DRG `FSD-WindowsNoEditor.pak`
 

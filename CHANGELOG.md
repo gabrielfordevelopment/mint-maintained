@@ -4,8 +4,12 @@
 
 ## [Unreleased] - ReleaseDate
 
+## [0.4.0] - 2026-10-10
+
 - Add dismissible notifications with centered icons, a ten-second progress indicator that pauses on hover, and persistent error details.
-- Add session undo/redo for profile and mod-list edits, with toolbar controls, keyboard shortcuts and an Undo action in editing notifications.
+- Add session undo/redo for the last 50 profile and mod-list edits, including shared groups, removals, imports and mod settings. Use toolbar controls, Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z, or Undo in editing notifications. Game files and cache operations are excluded, and history resets when the app closes.
+- Explain which active mod links were copied, excluding disabled mods and groups. Keep moves, toggles and successful Undo/Redo silent.
+- Open confirmation dialogs without a focused button; Enter alone does nothing, while Tab navigation and Escape remain available.
 - Replace the default egui icon with the MINT Maintained M monogram in application windows and the Windows executable.
 - Unify collapsible sections and selection dropdowns with animated SVG chevrons.
 
@@ -115,6 +119,7 @@ MINT Maintained features.
 
 <!-- next-url -->
 [Unreleased]: https://github.com/gabrielfordevelopment/mint-maintained/compare/master...develop
+[0.4.0]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.4.0
 [0.3.0]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.3.0
 [0.2.10]: https://github.com/trumank/mint/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/trumank/mint/compare/v0.2.8...v0.2.9
