@@ -27,7 +27,6 @@ pub trait NamedEntries<E> {
     fn select(&mut self, name: String);
     fn selected_name(&self) -> &str;
     fn add_new(&mut self, name: &str);
-    fn remove_selected(&mut self);
     fn rename_selected(&mut self, new_name: String);
     fn duplicate_selected(&mut self, new_name: String);
     fn entries<'s>(&'s mut self) -> Box<dyn Iterator<Item = (&'s String, &'s E)> + 's>;
@@ -50,9 +49,6 @@ impl NamedEntries<ModProfile> for ModData {
         self.profiles.insert(name.to_owned(), Default::default());
         self.active_profile = name.to_string();
     }
-    fn remove_selected(&mut self) {
-        self.remove_active_profile();
-    }
     fn rename_selected(&mut self, new_name: String) {
         let tmp = self.profiles.remove(&self.active_profile).unwrap();
         self.profiles.insert(new_name.clone(), tmp);
@@ -73,6 +69,7 @@ pub(crate) fn ui<E, N>(
     ui: &mut egui::Ui,
     name: &str,
     entries: &mut N,
+    delete_requested: &mut bool,
     additional_ui: Option<impl FnOnce(&mut egui::Ui, &mut N)>,
 ) -> bool
 where
@@ -82,7 +79,7 @@ where
     ui.push_id(name, |ui| {
         ui.horizontal(|ui| {
             mk_add(ui, name, entries, &mut modified);
-            mk_delete(ui, name, entries, &mut modified);
+            mk_delete(ui, name, entries, delete_requested);
             mk_rename(ui, name, entries, &mut modified);
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
@@ -101,15 +98,14 @@ where
     modified
 }
 
-fn mk_delete<E, N>(ui: &mut egui::Ui, name: &str, entries: &mut N, modified: &mut bool)
+fn mk_delete<E, N>(ui: &mut egui::Ui, name: &str, entries: &mut N, delete_requested: &mut bool)
 where
     N: NamedEntries<E>,
 {
     ui.add_enabled_ui(entries.len() > 1, |ui| {
         ui.scope(|ui| {
             if icons::button(ui, Icon::Delete, &format!("Delete {name}")).clicked() {
-                entries.remove_selected();
-                *modified = true;
+                *delete_requested = true;
             }
         });
     });

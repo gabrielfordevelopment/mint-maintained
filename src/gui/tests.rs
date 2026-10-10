@@ -1,4 +1,5 @@
 use super::*;
+mod editing;
 use crate::providers::ModResolution;
 use crate::state::ModGroup;
 
@@ -263,6 +264,7 @@ impl TestApp {
             },
             |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| self.app.ui_profile(ui, "default"));
+                self.app.show_delete_confirmation(ctx);
             },
         )
     }
@@ -285,6 +287,14 @@ impl TestApp {
         let output = self.frame(vec![]);
         self.click(text_rect(&output, name).center());
         self.frame(vec![]);
+    }
+
+    fn confirm_delete(&mut self) {
+        assert!(self.app.delete_confirmation.is_some());
+        self.frame(vec![]);
+        let output = self.frame(vec![]);
+        self.click(button_rects(&output, "Delete")[0].center());
+        assert!(self.app.delete_confirmation.is_none());
     }
 }
 
@@ -434,6 +444,7 @@ fn sorted_group_uses_local_indices_for_toggle_and_duplicate_removal() {
     assert!(test.app.state.mod_data.groups["Group"].mods[1].enabled);
     let output = test.frame(vec![]);
     test.click(button_rects(&output, "Remove duplicate")[0].center());
+    test.confirm_delete();
     let group = &test.app.state.mod_data.groups["Group"];
     assert_eq!(group.mods.len(), 1);
     assert!(group.mods[0].spec.url.ends_with("zulu.pak"));
@@ -459,6 +470,7 @@ fn sorted_individual_delete_targets_the_displayed_mod() {
     let output = test.frame(vec![]);
     assert!(text_rect(&output, "alpha.pak").top() < text_rect(&output, "zulu.pak").top());
     test.click(button_rects(&output, "Delete mod")[0].center());
+    test.confirm_delete();
     let mods = &test.app.state.mod_data.profiles["default"].mods;
     assert_eq!(mods.len(), 1);
     assert!(matches!(&mods[0], ModOrGroup::Individual(mc) if mc.spec.url.ends_with("zulu.pak")));

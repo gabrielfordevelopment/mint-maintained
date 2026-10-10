@@ -14,10 +14,13 @@
 | Location | Responsibility |
 | --- | --- |
 | `src/main.rs`, `src/lib.rs` | CLI, startup, application directories, shared application helpers |
-| `src/gui/mod.rs`, `src/gui/message.rs` | egui application, sorting and row actions, asynchronous operation dispatch and results |
+| `src/gui/mod.rs`, `src/gui/message.rs` | egui application shell, asynchronous operation dispatch and results |
+| `src/gui/mod_list.rs`, `sorting.rs`, `settings.rs`, `lint.rs` | Mod rows, display ordering, settings/provider dialogs, lint selection and reports |
+| `src/gui/editing.rs`, `groups.rs`, `src/state/edits.rs` | Deletion confirmation, shared-group management, validated profile/group operations |
 | `src/gui/icons.rs`, `assets/icons/` | Shared SVG controls, display-scale-aware texture caching, icon sources and licenses |
 | `src/gui/named_combobox.rs`, `src/gui/tests.rs` | Profile/group controls and GUI interaction/sorting regression tests |
-| `src/state/` | Settings, profiles, groups, versioned serialization, migrations, JSON persistence |
+| `src/state/`, `src/state/settings.rs` | Settings types, profiles, groups, versioned serialization, migrations, JSON persistence |
+| `src/windows_startup.rs` | Windows parent-console attachment while preserving redirected CLI streams |
 | `src/providers/` | Local/HTTP/mod.io providers, metadata and blob caches, dependency resolution and downloads |
 | `src/integrate.rs`, `src/mod_lints/` | Game pak integration, hook installation/uninstallation, mod validation |
 | `mint_lib/` | Shared mod/game contracts, installation discovery, logging, update URLs and build metadata |
@@ -46,6 +49,8 @@
 - Missing metadata is a supported state, including adjacent mods where one or both lack metadata. Comparators must remain deterministic and consistent. Cover these cases when changing sorting.
 - Preserve the persisted interpretation of sorting settings, including the existing `is_ascending` field, unless an explicit behavior change includes compatibility handling.
 - Keep network, downloads, and integration work outside the UI frame. Preserve request-ID checks that prevent stale asynchronous results from replacing current state.
+- Route destructive profile/list/group actions through `src/state/edits.rs` and the shared GUI confirmation path. Normal clicks confirm; Shift at the originating click bypasses confirmation. Cancel/Escape must preserve data, and stale confirmations must not act on changed lists.
+- Groups are shared across profiles. Removing a group row detaches only that profile reference; deleting a shared group removes it and its references globally. Ungroup copies members into that profile in order and preserves their effective enabled state. Show affected profiles before global/shared deletion; never delete downloaded files as part of list editing.
 
 ### Saved data and providers
 

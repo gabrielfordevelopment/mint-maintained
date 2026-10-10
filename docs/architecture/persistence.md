@@ -8,6 +8,8 @@
 | `config.json` | [src/state/mod.rs](../../src/state/mod.rs) | Provider parameters, game path, theme, and sorting settings; legacy and versioned readers. |
 | `profiles.json`, `mod_data.json` | [src/state/mod.rs](../../src/state/mod.rs) | Legacy profiles migrate into ordered individual/group entries. Current mod data takes precedence over the retained legacy backup. |
 | JSON writes | [src/state/config.rs](../../src/state/config.rs) | Serialize to a temporary file in the destination directory, then persist it over the destination. |
+| Settings enums | [src/state/settings.rs](../../src/state/settings.rs) | Theme and sorting wire names remain unchanged; GUI conversion/rendering consumes these types. |
+| Profile/group edits | [src/state/edits.rs](../../src/state/edits.rs) | Validate mutations on a candidate copy before replacing state; preserve shared group references and reject stale confirmed deletions. |
 | `cache.json` and blobs | [src/providers/cache.rs](../../src/providers/cache.rs), [ModStore](../../src/providers/mod_store.rs) | Versioned provider metadata, provider type tags, numeric mod/file keys, and SHA-256-addressed downloaded blobs. |
 
 The source types and version declarations are authoritative; do not duplicate schema versions or defaults in UI code. Provider metadata is a cache, but deleting it can remove offline functionality. OAuth parameters are private data and must not enter fixtures or diagnostics.
@@ -24,6 +26,7 @@ The source types and version declarations are authoritative; do not duplicate sc
 - Provider-store initialization returns cache-save failures. GUI save failures remain visible through error details and retain in-memory changes for retry; do not report them as saved. Startup errors open a recovery screen with the error chain, relevant folders and retry, without automatically repairing/resetting data.
 - Preserve the direct-byte deserialization workaround for tagged caches with numeric keys. A `serde_json::Value` round trip is not an interchangeable replacement without representative tests.
 - Preserve saved manual order and the meaning of released sorting fields. Sorting is presentation state, not a migration of stored mod order.
+- Group management uses the existing shared `groups` map and profile references without a schema bump. Rename updates every reference; profile deletion/detachment keeps shared definitions; global group deletion removes all references. Ungroup leaves other profiles unchanged and copies members in place, applying a disabled group flag to the resulting standalone entries.
 
 ## Migration procedure and evidence
 

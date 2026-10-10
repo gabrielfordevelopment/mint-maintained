@@ -1,4 +1,7 @@
 pub mod config;
+pub mod edits;
+mod settings;
+pub use settings::{GuiTheme, SortBy};
 
 #[cfg(test)]
 mod persistence_tests;
@@ -15,16 +18,15 @@ use serde::{Deserialize, Serialize};
 use snafu::prelude::*;
 
 use self::config::ConfigWrapper;
+use crate::providers::ProviderError;
 use crate::{
     Dirs,
-    gui::GuiTheme,
     providers::{ModSpecification, ModStore},
 };
-use crate::{gui::SortBy, providers::ProviderError};
 use mint_lib::{DRGInstallation, mod_info::MetaConfig};
 
 /// Mod configuration, holds ModSpecification as well as other metadata
-#[derive(Debug, Clone, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ModConfig {
     pub spec: ModSpecification,
     pub required: bool,
@@ -43,7 +45,7 @@ fn is_zero(value: &i32) -> bool {
     *value == 0
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ModGroup {
     pub mods: Vec<ModConfig>,
 }
@@ -51,7 +53,7 @@ pub struct ModGroup {
 #[obake::versioned]
 #[obake(version("0.0.0"))]
 #[obake(version("0.1.0"))]
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ModProfile {
     #[obake(cfg("0.0.0"))]
     pub mods: Vec<ModConfig>,
@@ -61,7 +63,7 @@ pub struct ModProfile {
     pub mods: Vec<ModOrGroup>,
 }
 
-#[derive(Debug, Clone, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ModOrGroup {
     Group { group_name: String, enabled: bool },
@@ -78,7 +80,7 @@ impl From<ModProfile!["0.0.0"]> for ModProfile!["0.1.0"] {
 #[obake::versioned]
 #[obake(version("0.0.0"))]
 #[obake(version("0.1.0"))]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModData {
     pub active_profile: String,
     #[obake(cfg("0.0.0"))]
@@ -461,6 +463,8 @@ impl From<&VersionAnnotatedConfig> for MetaConfig {
 
 #[derive(Debug, Snafu)]
 pub enum StateError {
+    #[snafu(display("{message}"))]
+    InvalidEdit { message: String },
     #[snafu(display("invalid mod_data.json: {message}. The original file has been preserved"))]
     InvalidModData { message: String },
     #[snafu(display("failed to deserialize user config"))]
