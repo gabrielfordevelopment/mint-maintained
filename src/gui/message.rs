@@ -223,7 +223,16 @@ impl ResolveMods {
                                 .join("\n")
                         ))
                     });
-                    app.report_save(app.state.mod_data.save());
+                    let previous_edit = app.history.undo_id();
+                    if app.save_mod_data("Add mods")
+                        && let Some(action) = &mut app.last_action
+                        && matches!(action.status, super::LastActionStatus::Success(_))
+                    {
+                        action.undo_id = app
+                            .history
+                            .undo_id()
+                            .filter(|id| Some(*id) != previous_edit);
+                    }
                 }
                 Err(ProviderError::NoProvider { url: _, factory }) => {
                     app.window_provider_parameters =

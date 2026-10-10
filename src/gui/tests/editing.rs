@@ -323,6 +323,7 @@ fn deletion_confirmation_cancel_escape_enter_and_shift_preserve_files_in_both_th
             assert_eq!(test.app.state.mod_data.get_active_profile().mods.len(), 1);
             test.full_frame(vec![]);
             let frame = test.full_frame(vec![]);
+            assert!(test.context.memory(|memory| memory.focused()).is_none());
             assert!(
                 text_rect(
                     &frame,
@@ -344,6 +345,21 @@ fn deletion_confirmation_cancel_escape_enter_and_shift_preserve_files_in_both_th
                     repeat: false,
                     modifiers: egui::Modifiers::NONE,
                 }]);
+            }
+            if cancel == "Enter" {
+                assert!(
+                    test.app.delete_confirmation.is_some(),
+                    "Enter without focus must do nothing"
+                );
+                for key in [egui::Key::Tab, egui::Key::Enter] {
+                    test.full_frame(vec![egui::Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }]);
+                }
             }
             assert!(test.app.delete_confirmation.is_none(), "{cancel}");
             assert_eq!(test.app.state.mod_data.get_active_profile().mods.len(), 1);

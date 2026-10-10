@@ -9,7 +9,7 @@ members = [
 repository = "https://github.com/gabrielfordevelopment/mint-maintained"
 authors = ["trumank", "jieyouxu"]
 license = "MIT OR Apache-2.0"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 
 [workspace.dependencies]
@@ -28,6 +28,8 @@ tracing-subscriber = { version = "0.3.19", features = ["fmt", "env-filter", "std
 tokio = "1.47.1"
 reqwest = { version = "0.11.27", default-features = false, features = ["blocking", "rustls", "json"] }
 snafu = "0.8.7"
+resvg = { version = "0.48.1", default-features = false }
+image = { version = "0.25.6", default-features = false, features = ["png"] }
 
 [package]
 name = "mint"
@@ -52,11 +54,11 @@ dialoguer = "0.11.0"
 directories = "6.0.0"
 eframe = "0.31.1"
 egui = "0.31.1"
-resvg = { version = "0.48.1", default-features = false }
+resvg.workspace = true
 egui_commonmark = "0.20.0"
 futures = "0.3.31"
 hex = "0.4.3"
-image = { version = "0.25.6", default-features = false, features = ["png"] }
+image.workspace = true
 indexmap = { version = "2.11.0", features = ["serde"] }
 inventory = "0.3.21"
 mint_lib = { path = "mint_lib" }
@@ -114,3 +116,8 @@ lto = "off"
 [dev-dependencies]
 mockall = "0.13.1"
 tracing-subscriber.workspace = true
+
+[build-dependencies]
+winresource = { version = "0.1.31", default-features = false }
+resvg.workspace = true
+image = { workspace = true, features = ["ico"] }

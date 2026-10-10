@@ -166,14 +166,14 @@ impl App {
 
                                 if let Some(conflicting_mods) = &report.conflicting_mods
                                     && !conflicting_mods.is_empty() {
-                                        CollapsingHeader::new(
+                                        icons::collapsing_header(
                                             RichText::new("⚠ Mods(s) with conflicting asset modifications detected")
                                                 .color(AMBER),
                                         )
                                         .default_open(true)
                                         .show(ui, |ui| {
                                             conflicting_mods.iter().for_each(|(path, mods)| {
-                                                CollapsingHeader::new(
+                                                icons::collapsing_header(
                                                     RichText::new(format!(
                                                         "⚠ Conflicting modification of asset `{path}`"
                                                     ))
@@ -193,7 +193,7 @@ impl App {
 
                                 if let Some(asset_register_bin_mods) = &report.asset_register_bin_mods
                                     && !asset_register_bin_mods.is_empty() {
-                                        CollapsingHeader::new(
+                                        icons::collapsing_header(
                                             RichText::new("ℹ Mod(s) with `AssetRegistry.bin` included detected")
                                                 .color(Color32::LIGHT_BLUE),
                                         )
@@ -201,7 +201,7 @@ impl App {
                                         .show(ui, |ui| {
                                             asset_register_bin_mods.iter().for_each(
                                                 |(r#mod, paths)| {
-                                                    CollapsingHeader::new(
+                                                    icons::collapsing_header(
                                                         RichText::new(format!(
                                                         "ℹ {} includes one or more `AssetRegistry.bin`",
                                                         r#mod.url
@@ -220,7 +220,7 @@ impl App {
 
                                 if let Some(shader_file_mods) = &report.shader_file_mods
                                     && !shader_file_mods.is_empty() {
-                                        CollapsingHeader::new(
+                                        icons::collapsing_header(
                                             RichText::new(
                                                 "⚠ Mods(s) with shader files included detected",
                                             )
@@ -230,7 +230,7 @@ impl App {
                                         .show(ui, |ui| {
                                             shader_file_mods.iter().for_each(
                                                 |(r#mod, shader_files)| {
-                                                    CollapsingHeader::new(
+                                                    icons::collapsing_header(
                                                         RichText::new(format!(
                                                             "⚠ {} includes one or more shader files",
                                                             r#mod.url
@@ -249,7 +249,7 @@ impl App {
 
                                 if let Some(outdated_pak_version_mods) = &report.outdated_pak_version_mods
                                     && !outdated_pak_version_mods.is_empty() {
-                                        CollapsingHeader::new(
+                                        icons::collapsing_header(
                                             RichText::new(
                                                 "⚠ Mod(s) with outdated pak version detected",
                                             )
@@ -273,7 +273,7 @@ impl App {
 
                                 if let Some(empty_archive_mods) = &report.empty_archive_mods
                                     && !empty_archive_mods.is_empty() {
-                                        CollapsingHeader::new(
+                                        icons::collapsing_header(
                                             RichText::new(
                                                 "⚠ Mod(s) with empty archives detected",
                                             )
@@ -295,7 +295,7 @@ impl App {
 
                                 if let Some(archive_with_only_non_pak_files_mods) = &report.archive_with_only_non_pak_files_mods
                                     && !archive_with_only_non_pak_files_mods.is_empty() {
-                                        CollapsingHeader::new(
+                                        icons::collapsing_header(
                                             RichText::new(
                                                 "⚠ Mod(s) with only non-`.pak` files detected",
                                             )
@@ -317,7 +317,7 @@ impl App {
 
                                 if let Some(archive_with_multiple_paks_mods) = &report.archive_with_multiple_paks_mods
                                     && !archive_with_multiple_paks_mods.is_empty() {
-                                        CollapsingHeader::new(
+                                        icons::collapsing_header(
                                             RichText::new(
                                                 "⚠ Mod(s) with multiple `.pak`s detected",
                                             )
@@ -337,7 +337,7 @@ impl App {
 
                                 if let Some(non_asset_file_mods) = &report.non_asset_file_mods
                                     && !non_asset_file_mods.is_empty() {
-                                        CollapsingHeader::new(
+                                        icons::collapsing_header(
                                             RichText::new(
                                                 "⚠ Mod(s) with non-asset files detected",
                                             )
@@ -346,7 +346,7 @@ impl App {
                                         .default_open(true)
                                         .show(ui, |ui| {
                                             non_asset_file_mods.iter().for_each(|(r#mod, files)| {
-                                                CollapsingHeader::new(
+                                                icons::collapsing_header(
                                                     RichText::new(format!(
                                                         "⚠ {} includes non-asset files",
                                                         r#mod.url
@@ -364,7 +364,7 @@ impl App {
 
                                 if let Some(split_asset_pairs_mods) = &report.split_asset_pairs_mods
                                     && !split_asset_pairs_mods.is_empty() {
-                                        CollapsingHeader::new(
+                                        icons::collapsing_header(
                                             RichText::new(
                                                 "⚠ Mod(s) with split {uexp, uasset} pairs detected",
                                             )
@@ -373,7 +373,7 @@ impl App {
                                         .default_open(true)
                                         .show(ui, |ui| {
                                             split_asset_pairs_mods.iter().for_each(|(r#mod, files)| {
-                                                CollapsingHeader::new(
+                                                icons::collapsing_header(
                                                     RichText::new(format!(
                                                         "⚠ {} includes split {{uexp, uasset}} pairs",
                                                         r#mod.url
@@ -398,7 +398,7 @@ impl App {
 
                                 if let Some(unmodified_game_assets_mods) = &report.unmodified_game_assets_mods
                                     && !unmodified_game_assets_mods.is_empty() {
-                                        CollapsingHeader::new(
+                                        icons::collapsing_header(
                                             RichText::new(
                                                 "⚠ Mod(s) with unmodified game assets detected",
                                             )
@@ -407,7 +407,7 @@ impl App {
                                         .default_open(true)
                                         .show(ui, |ui| {
                                             unmodified_game_assets_mods.iter().for_each(|(r#mod, files)| {
-                                                CollapsingHeader::new(
+                                                icons::collapsing_header(
                                                     RichText::new(format!(
                                                         "⚠ {} includes unmodified game assets",
                                                         r#mod.url

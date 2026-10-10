@@ -65,6 +65,7 @@ impl App {
             add_deps: Option<Vec<ModSpecification>>,
             edit: Option<Edit>,
             open_group: Option<String>,
+            copied_link: bool,
             rows: Vec<drag_drop::DropRow>,
             header: Option<(egui::Rect, String, usize)>,
         }
@@ -75,6 +76,7 @@ impl App {
             add_deps: None,
             edit: None,
             open_group: None,
+            copied_link: false,
             rows: Vec::new(),
             header: None,
         };
@@ -294,7 +296,8 @@ impl App {
                 }
 
                 if let Some(info) = &info {
-                    let dropdown = egui::ComboBox::from_id_salt("version")
+                    let previous_settings = (mc.spec.url.clone(), mc.priority);
+                    let dropdown = icons::combo_box("version")
                         .selected_text(
                             self.state
                                 .store
@@ -360,8 +363,11 @@ impl App {
                         );
                     });
 
+                    ctx.needs_save |=
+                        previous_settings.0 != mc.spec.url || previous_settings.1 != mc.priority;
                     if icons::button(ui, Icon::Copy, "Copy URL").clicked() {
                         ui.ctx().copy_text(mc.spec.url.to_string());
+                        ctx.copied_link = true;
                     }
 
                     if mc.enabled {
@@ -459,6 +465,7 @@ impl App {
                 } else {
                     if icons::button(ui, Icon::Copy, "Copy URL").clicked() {
                         ui.ctx().copy_text(mc.spec.url.to_string());
+                        ctx.copied_link = true;
                     }
 
                     let search = searchable_text(&mc.spec.url, &self.search_string, {
@@ -528,7 +535,7 @@ impl App {
                             {
                                 ctx.needs_save = true;
                             }
-                            let header = egui::CollapsingHeader::new(group_name.as_str())
+                            let header = icons::collapsing_header(group_name.as_str())
                                 .open(Some({
                                     let state = group_views.get(&profile_name, group_name);
                                     let hovering = can_drag
@@ -547,25 +554,6 @@ impl App {
                                     }
                                     state.open
                                 }))
-                                .icon(|ui, openness, response| {
-                                    Icon::ChevronRight
-                                        .image(ui, ui.visuals().text_color())
-                                        .rotate(
-                                            if openness > 0.5 {
-                                                std::f32::consts::FRAC_PI_2
-                                            } else {
-                                                0.0
-                                            },
-                                            egui::Vec2::splat(0.5),
-                                        )
-                                        .paint_at(
-                                            ui,
-                                            egui::Rect::from_center_size(
-                                                response.rect.center(),
-                                                egui::Vec2::splat(icons::SIZE),
-                                            ),
-                                        );
-                                })
                                 .show(ui, |ui| {
                                     let body_background = ui.painter().add(egui::Shape::Noop);
                                     let body_top = ui.cursor().top();
@@ -828,7 +816,10 @@ impl App {
         self.scroll_to_match = ctx.scroll_to_match;
 
         if ctx.needs_save {
-            self.report_save(self.state.mod_data.save());
+            self.save_mod_data("Edit mod settings");
+        }
+        if ctx.copied_link {
+            self.notifications.success("Copied mod link.");
         }
         if let Some(name) = ctx.open_group {
             self.groups_window = Some(groups::GroupsWindow::selected(name));
