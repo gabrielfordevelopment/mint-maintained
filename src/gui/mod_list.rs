@@ -9,10 +9,18 @@ impl App {
             ui.disable();
         }
         let sorting_config = self.get_sorting_config();
-        let can_drag = sorting_config.is_none();
+        let can_drag = ui.is_enabled();
+        let display_order = self.visible_order(profile, sorting_config.as_ref());
+        let sorting_key = sorting_config
+            .as_ref()
+            .map(|config| (config.sort_category, config.is_ascending));
         let snapshot = (ui.input(|i| i.pointer.primary_down())
             && !egui::DragAndDrop::has_any_payload(ui.ctx()))
-        .then(|| (**self.state.mod_data).clone());
+        .then(|| drag_drop::DragSnapshot {
+            before: (**self.state.mod_data).clone(),
+            order: display_order.clone(),
+            sorting: sorting_key,
+        });
         let profile_name = profile.to_owned();
         let group_names: Vec<_> = self.state.mod_data.groups.keys().cloned().collect();
         let group_fills: HashMap<_, _> = self
@@ -548,12 +556,9 @@ impl App {
                                     let keys = row_keys(
                                         group.mods.iter().map(|mc| (false, mc.spec.url.clone())),
                                     );
-                                    let order = sorted_mod_indices(
-                                        group.mods.iter().map(Some),
-                                        sorting_config.as_ref(),
-                                        |spec| self.state.store.get_mod_info(spec),
-                                    );
-                                    for (visual_index, index) in order.into_iter().enumerate() {
+                                    for (visual_index, &index) in
+                                        display_order.groups[group_name].iter().enumerate()
+                                    {
                                         ui.push_id(
                                             ("group", group_name.as_str(), &keys[index]),
                                             |ui| {
@@ -603,7 +608,7 @@ impl App {
                                                     target: ListTarget {
                                                         profile: profile_name.clone(),
                                                         group: Some(group_name.clone()),
-                                                        index,
+                                                        index: visual_index,
                                                     },
                                                     group: None,
                                                     parent_index: Some(row_index),
@@ -700,15 +705,7 @@ impl App {
                 ModOrGroup::Individual(mc) => (false, mc.spec.url.clone()),
                 ModOrGroup::Group { group_name, .. } => (true, group_name.clone()),
             }));
-            let order = sorted_mod_indices(
-                profile.mods.iter().map(|item| match item {
-                    ModOrGroup::Individual(mc) => Some(mc),
-                    ModOrGroup::Group { .. } => None,
-                }),
-                sorting_config.as_ref(),
-                |spec| self.state.store.get_mod_info(spec),
-            );
-            for (visual_index, store_index) in order.into_iter().enumerate() {
+            for (visual_index, &store_index) in display_order.profile.iter().enumerate() {
                 let group_name = match &profile.mods[store_index] {
                     ModOrGroup::Group { group_name, .. } => Some(group_name.clone()),
                     _ => None,
@@ -773,13 +770,21 @@ impl App {
                     target: ListTarget {
                         profile: profile_name.clone(),
                         group: None,
-                        index: store_index,
+                        index: visual_index,
                     },
                     group,
                     parent_index: None,
                 });
             }
-            drag_drop::finish(ui, &ctx.rows, &profile_name, profile.mods.len(), can_drag)
+            drag_drop::finish(
+                ui,
+                &ctx.rows,
+                &profile_name,
+                profile.mods.len(),
+                can_drag,
+                &display_order,
+                sorting_key,
+            )
         };
 
         let mut dropped = None;
@@ -791,8 +796,11 @@ impl App {
             }
         });
 
-        if let Some(edit) = dropped {
-            self.finish_edit(edit);
+        if let Some(edit) = dropped
+            && self.finish_edit(edit)
+            && sorting_config.is_some()
+        {
+            self.update_sorting_config(None, false);
         }
 
         if let Some(add_deps) = ctx.add_deps {

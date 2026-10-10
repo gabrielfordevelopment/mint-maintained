@@ -1,7 +1,7 @@
 use super::*;
 
 impl TestApp {
-    fn full_frame(&mut self, events: Vec<egui::Event>) -> egui::FullOutput {
+    pub(super) fn full_frame(&mut self, events: Vec<egui::Event>) -> egui::FullOutput {
         self.app.has_run_init = true;
         self.app.state.config.drg_pak_path = None;
         let modifiers = events
@@ -33,7 +33,7 @@ impl TestApp {
         )
     }
 
-    fn full_click(&mut self, pos: egui::Pos2, shift: bool) {
+    pub(super) fn full_click(&mut self, pos: egui::Pos2, shift: bool) {
         for pressed in [true, false] {
             self.full_frame(vec![
                 egui::Event::PointerMoved(pos),
@@ -50,7 +50,7 @@ impl TestApp {
         }
     }
 
-    fn full_button(&mut self, label: &str, shift: bool) {
+    pub(super) fn full_button(&mut self, label: &str, shift: bool) {
         self.full_frame(vec![]);
         let frame = self.full_frame(vec![]);
         self.full_click(button_rects(&frame, label)[0].center(), shift);

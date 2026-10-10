@@ -76,7 +76,6 @@ use request_counter::{RequestCounter, RequestID};
 use self::toggle_switch::toggle_switch;
 pub use crate::state::{GuiTheme, SortBy};
 use settings::{WindowProviderParameters, WindowSettings};
-use sorting::sorted_mod_indices;
 
 pub fn gui(dirs: Dirs, args: Option<Vec<String>>) -> Result<(), MintError> {
     let options = eframe::NativeOptions {
@@ -795,32 +794,7 @@ impl eframe::App for App {
             let profile = self.state.mod_data.active_profile.clone();
 
             ui.horizontal(|ui| {
-                ui.label("Sort by: ");
-
-                let (mut sort_category, mut is_ascending) = self
-                    .get_sorting_config()
-                    .map(|c| (Some(c.sort_category), c.is_ascending))
-                    .unwrap_or_default();
-
-                let mut clicked = ui.radio_value(&mut sort_category, None, "Manual").clicked();
-                for category in SortBy::iter() {
-                    let mut radio_label = category.as_str().to_owned();
-                    if sort_category == Some(category) {
-                        radio_label.push_str(if is_ascending { " ⏶" } else { " ⏷" });
-                    }
-                    let resp = ui.radio_value(&mut sort_category, Some(category), radio_label);
-                    if resp.clicked() {
-                        clicked = true;
-                        if resp.changed() {
-                            is_ascending = true;
-                        } else {
-                            is_ascending = !is_ascending;
-                        }
-                    };
-                }
-                if clicked {
-                    self.update_sorting_config(sort_category, is_ascending);
-                }
+                self.ui_sort_controls(ui);
 
                 ui.add_space(16.);
                 let search_string = &mut self.search_string;
@@ -833,7 +807,9 @@ impl eframe::App for App {
                         .unwrap_or(false)
                 });
 
-                let mut text_edit = egui::TextEdit::singleline(search_string).hint_text("Search");
+                let mut text_edit = egui::TextEdit::singleline(search_string)
+                    .hint_text("Search")
+                    .desired_width(ui.available_width());
                 if !any_matches {
                     text_edit = text_edit.text_color(ui.visuals().error_fg_color);
                 }

@@ -30,6 +30,38 @@ fn target(group: Option<&str>, index: usize) -> ListTarget {
 }
 
 #[test]
+fn visible_order_moves_are_atomic_and_detect_changes_relative_to_the_view() {
+    let original = fixture();
+    for indices in [vec![0, 0], vec![0], vec![0, 9]] {
+        let mut data = original.clone();
+        let edit = PreparedEdit::move_in_visible_order(
+            &data,
+            target(None, 0),
+            target(None, 2),
+            VisibleOrder {
+                profile: indices,
+                groups: Default::default(),
+            },
+        );
+        assert!(edit.apply(&mut data).is_err());
+        assert_eq!(data, original);
+    }
+    let order = VisibleOrder {
+        profile: vec![1, 0],
+        groups: Default::default(),
+    };
+    let mut data = original.clone();
+    let no_op =
+        PreparedEdit::move_in_visible_order(&data, target(None, 1), target(None, 1), order.clone());
+    assert!(!no_op.apply(&mut data).unwrap());
+    assert_eq!(data, original);
+    let changed_view =
+        PreparedEdit::move_in_visible_order(&data, target(None, 1), target(None, 2), order);
+    assert!(changed_view.apply(&mut data).unwrap());
+    assert_eq!(data, original);
+}
+
+#[test]
 fn indexed_moves_reorder_shared_members_and_reject_invalid_destinations_atomically() {
     let mut data = fixture();
     data.apply_edit(Edit::CreateGroup {

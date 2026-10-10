@@ -144,7 +144,7 @@ impl App {
         }
     }
 
-    pub(super) fn finish_edit(&mut self, edit: PreparedEdit) {
+    pub(super) fn finish_edit(&mut self, edit: PreparedEdit) -> bool {
         let action = edit.action().clone();
         let before = (**self.state.mod_data).clone();
         let item = match &action {
@@ -191,7 +191,7 @@ impl App {
                 .flat_map(|parameters| parameters.values().cloned()),
         );
         match edit.apply(&mut self.state.mod_data) {
-            Ok(()) => {
+            Ok(changed) => {
                 match &action {
                     Edit::CreateGroup { profile, name } | Edit::AttachGroup { profile, name } => {
                         self.group_views.open(profile, name)
@@ -213,7 +213,7 @@ impl App {
                 }
                 self.open_profiles
                     .retain(|profile| self.state.mod_data.profiles.contains_key(profile));
-                if before != **self.state.mod_data {
+                if changed {
                     if self.report_save(self.state.mod_data.save()) {
                         tracing::info!("{description}");
                     } else {
@@ -222,6 +222,7 @@ impl App {
                         );
                     }
                 }
+                changed
             }
             Err(error) => {
                 let error_text = diagnostics::redact(
@@ -236,6 +237,7 @@ impl App {
                     "Profile edit rejected; nothing changed. Attempted change: {description} Reason: {error_text}"
                 );
                 self.last_action = Some(LastAction::failure(error.to_string()));
+                false
             }
         }
     }

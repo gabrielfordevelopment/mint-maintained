@@ -207,7 +207,7 @@ fn dragging_between_groups_and_reordering_members_and_groups_preserves_contents(
 }
 
 #[test]
-fn outside_drops_and_sorted_views_do_not_mutate_manual_order() {
+fn outside_drops_and_no_op_sorted_drops_preserve_manual_order_and_sorting() {
     let mut test = TestApp::new();
     let config = test.local_mod("stay.pak");
     test.app
@@ -227,6 +227,189 @@ fn outside_drops_and_sorted_views_do_not_mutate_manual_order() {
     let source = button_rects(&frame, &format!("Drag {}", config.spec.url))[0].center();
     test.drag_row(source, egui::pos2(40.0, 200.0), true);
     assert_eq!(**test.app.state.mod_data, before);
+    assert!(test.app.get_sorting_config().is_some());
+}
+
+#[test]
+fn dragging_in_every_sort_mode_saves_visible_order_and_switches_to_manual() {
+    for category in SortBy::iter() {
+        for reverse in [false, true] {
+            let mut test = TestApp::new();
+            let mut zulu = test.local_mod("zulu.pak");
+            zulu.priority = 20;
+            zulu.enabled = false;
+            let alpha = test.local_mod("alpha.pak");
+            let missing = mod_config("missing-metadata");
+            let configs = [zulu, alpha, missing];
+            test.app.state.mod_data.get_active_profile_mut().mods = configs
+                .iter()
+                .cloned()
+                .map(ModOrGroup::Individual)
+                .collect();
+            test.app.update_sorting_config(Some(category), reverse);
+            test.frame(vec![]);
+            let frame = test.frame(vec![]);
+            let mut visible: Vec<_> = configs
+                .into_iter()
+                .map(|config| {
+                    let rect = button_rects(&frame, &format!("Drag {}", config.spec.url))[0];
+                    (rect, config)
+                })
+                .collect();
+            visible.sort_by(|a, b| a.0.top().total_cmp(&b.0.top()));
+            let source = visible[0].0.center();
+            visible.rotate_left(1);
+            let expected: Vec<_> = visible
+                .into_iter()
+                .map(|(_, config)| ModOrGroup::Individual(config))
+                .collect();
+            test.drag_row(source, egui::pos2(40.0, 350.0), true);
+            assert_eq!(
+                test.app.state.mod_data.get_active_profile().mods,
+                expected,
+                "{category:?}, reverse={reverse}"
+            );
+            assert!(test.app.get_sorting_config().is_none());
+            let loaded = State::init(test.app.state.dirs.clone()).unwrap();
+            assert!(loaded.config.sorting_config.is_none());
+            assert_eq!(loaded.mod_data.get_active_profile().mods, expected);
+        }
+    }
+}
+
+#[test]
+fn sorted_group_moves_preserve_visible_members_and_unrelated_groups() {
+    let mut test = TestApp::new();
+    let a = test.local_mod("a.pak");
+    let b = test.local_mod("b.pak");
+    let c = test.local_mod("c.pak");
+    let d = test.local_mod("d.pak");
+    for (name, mods) in [
+        ("A", vec![b.clone(), a.clone()]),
+        ("B", vec![d.clone(), c.clone()]),
+        ("Unrelated", vec![d.clone(), c.clone()]),
+    ] {
+        test.app.state.mod_data.groups.insert(
+            name.into(),
+            ModGroup {
+                mods,
+                ..Default::default()
+            },
+        );
+    }
+    test.app.state.mod_data.get_active_profile_mut().mods = ["A", "B"]
+        .into_iter()
+        .map(|name| ModOrGroup::Group {
+            group_name: name.into(),
+            enabled: true,
+        })
+        .collect();
+    test.app.update_sorting_config(Some(SortBy::Name), false);
+    test.open_group("A");
+    test.open_group("B");
+    let frame = test.frame(vec![]);
+    let source = button_rects(&frame, &format!("Drag {}", a.spec.url))[0].center();
+    let destination = button_rects(&frame, &format!("Drag {}", d.spec.url))[0].center_top()
+        + egui::vec2(0.0, 1.0);
+    test.drag_row(source, destination, true);
+    assert!(test.app.get_sorting_config().is_none());
+    assert_eq!(test.app.state.mod_data.groups["A"].mods, [b]);
+    assert_eq!(
+        test.app.state.mod_data.groups["B"].mods,
+        [c.clone(), a.clone(), d.clone()]
+    );
+    assert_eq!(test.app.state.mod_data.groups["Unrelated"].mods, [d, c]);
+    test.app.update_sorting_config(Some(SortBy::Name), true);
+    let frame = test.frame(vec![]);
+    test.drag_row(
+        button_rects(&frame, &format!("Drag {}", a.spec.url))[0].center(),
+        egui::pos2(40.0, 350.0),
+        true,
+    );
+    assert!(test.app.get_sorting_config().is_none());
+    assert!(
+        matches!(test.app.state.mod_data.get_active_profile().mods.last(), Some(ModOrGroup::Individual(config)) if *config == a)
+    );
+    test.app.update_sorting_config(Some(SortBy::Name), false);
+    let frame = test.frame(vec![]);
+    test.drag_row(
+        button_rects(&frame, &format!("Drag {}", a.spec.url))[0].center(),
+        text_rect(&frame, "B").center(),
+        true,
+    );
+    assert!(test.app.get_sorting_config().is_none());
+    assert_eq!(test.app.state.mod_data.groups["B"].mods.last(), Some(&a));
+    test.app.update_sorting_config(Some(SortBy::Name), true);
+    let frame = test.frame(vec![]);
+    test.drag_row(
+        button_rects(&frame, "Drag B")[0].center(),
+        button_rects(&frame, "Drag A")[0].center_top() + egui::vec2(0.0, 1.0),
+        true,
+    );
+    assert!(test.app.get_sorting_config().is_none());
+    assert!(
+        matches!(&test.app.state.mod_data.get_active_profile().mods[0], ModOrGroup::Group { group_name, .. } if group_name == "B")
+    );
+}
+
+#[test]
+fn cancelled_and_stale_sorted_drags_keep_the_sort_selection() {
+    for cancel in [0, 1, 2, 3] {
+        let mut test = TestApp::new();
+        let a = test.local_mod("a.pak");
+        let b = test.local_mod("b.pak");
+        test.app.state.mod_data.get_active_profile_mut().mods =
+            vec![ModOrGroup::Individual(b), ModOrGroup::Individual(a.clone())];
+        test.app.update_sorting_config(Some(SortBy::Name), false);
+        test.frame(vec![]);
+        let frame = test.frame(vec![]);
+        let target = egui::pos2(40.0, 350.0);
+        test.drag_row(
+            button_rects(&frame, &format!("Drag {}", a.spec.url))[0].center(),
+            target,
+            false,
+        );
+        match cancel {
+            0 => {
+                test.frame(vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+            }
+            1 => {
+                let new = test.local_mod("new.pak");
+                test.app
+                    .state
+                    .mod_data
+                    .get_active_profile_mut()
+                    .mods
+                    .push(ModOrGroup::Individual(new));
+            }
+            2 => test.app.update_sorting_config(Some(SortBy::Priority), true),
+            _ => {}
+        }
+        let before = (**test.app.state.mod_data).clone();
+        let pos = if cancel == 3 {
+            egui::pos2(-20.0, -20.0)
+        } else {
+            target
+        };
+        test.frame(vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]);
+        test.frame(vec![]);
+        assert_eq!(**test.app.state.mod_data, before);
+        assert!(test.app.get_sorting_config().is_some());
+    }
 }
 
 #[test]

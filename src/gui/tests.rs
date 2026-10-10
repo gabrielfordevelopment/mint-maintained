@@ -1,7 +1,9 @@
+use super::sorting::sorted_mod_indices;
 use super::*;
 mod drag_drop;
 mod editing;
 mod group_colors;
+mod sorting_controls;
 use crate::providers::ModResolution;
 use crate::state::ModGroup;
 

@@ -48,6 +48,43 @@ pub enum Edit {
 pub struct PreparedEdit {
     before: ModData,
     edit: Edit,
+    visible_order: Option<VisibleOrder>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VisibleOrder {
+    pub profile: Vec<usize>,
+    pub groups: std::collections::BTreeMap<String, Vec<usize>>,
+}
+
+impl VisibleOrder {
+    fn apply(&self, data: &mut ModData, profile: &str) -> Result<(), StateError> {
+        fn reorder<T: Clone>(items: &mut Vec<T>, order: &[usize]) -> Result<(), StateError> {
+            let mut seen = vec![false; items.len()];
+            if order.len() != items.len()
+                || order.iter().any(|&i| {
+                    seen.get_mut(i)
+                        .is_none_or(|seen| std::mem::replace(seen, true))
+                })
+            {
+                return Err(invalid("The displayed order changed. Try dragging again."));
+            }
+            *items = order.iter().map(|&i| items[i].clone()).collect();
+            Ok(())
+        }
+        reorder(data.profile_entries(profile)?, &self.profile)?;
+        for (name, order) in &self.groups {
+            if !data.group_users(name).iter().any(|user| user == profile) {
+                return Err(invalid("The displayed group is no longer in this profile."));
+            }
+            let group = data
+                .groups
+                .get_mut(name)
+                .ok_or_else(|| invalid("The group no longer exists."))?;
+            reorder(&mut group.mods, order)?;
+        }
+        Ok(())
+    }
 }
 
 impl PreparedEdit {
@@ -59,16 +96,68 @@ impl PreparedEdit {
         Self {
             before: data.clone(),
             edit,
+            visible_order: None,
         }
     }
 
-    pub fn apply(self, data: &mut ModData) -> Result<(), StateError> {
+    pub fn move_in_visible_order(
+        data: &ModData,
+        source: ListTarget,
+        destination: ListTarget,
+        order: VisibleOrder,
+    ) -> Self {
+        Self {
+            before: data.clone(),
+            edit: Edit::MoveEntry {
+                source,
+                destination,
+            },
+            visible_order: Some(order),
+        }
+    }
+
+    pub fn apply(self, data: &mut ModData) -> Result<bool, StateError> {
         if *data != self.before {
             return Err(invalid(
                 "The list changed during this operation. Nothing was changed; select the item again.",
             ));
         }
-        data.apply_edit(self.edit)
+        if let Some(order) = self.visible_order {
+            let Edit::MoveEntry {
+                mut source,
+                destination,
+            } = self.edit
+            else {
+                return Err(invalid("Only drag moves can apply a displayed order."));
+            };
+            let indices = match &source.group {
+                Some(name) => order
+                    .groups
+                    .get(name)
+                    .ok_or_else(|| invalid("The source group is no longer displayed."))?,
+                None => &order.profile,
+            };
+            source.index = indices
+                .iter()
+                .position(|&i| i == source.index)
+                .ok_or_else(|| invalid("The source entry is no longer displayed."))?;
+            let mut candidate = data.clone();
+            order.apply(&mut candidate, &source.profile)?;
+            let displayed = candidate.clone();
+            candidate.apply_edit(Edit::MoveEntry {
+                source,
+                destination,
+            })?;
+            if candidate != displayed {
+                *data = candidate;
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        } else {
+            data.apply_edit(self.edit)?;
+            Ok(*data != self.before)
+        }
     }
 }
 

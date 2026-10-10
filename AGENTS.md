@@ -52,7 +52,7 @@
 - Keep network, downloads, and integration work outside the UI frame. Preserve request-ID checks that prevent stale asynchronous results from replacing current state.
 - Route destructive profile/list/group actions through `src/state/edits.rs` and the shared GUI confirmation path. Normal clicks confirm; Shift at the originating click bypasses confirmation. Cancel/Escape must preserve data, and stale confirmations must not act on changed lists.
 - Groups are shared across profiles. Removing a group row detaches only that profile reference; deleting a shared group removes it and its references globally. Ungroup copies members into that profile in order and preserves their effective enabled state. Show affected profiles before global/shared deletion; never delete downloaded files as part of list editing.
-- Dragging is available in Manual sorting. Commit moves only on a valid drop, validate the captured source state, preserve switch identities across reorder, and show group/insert feedback. Escape and drops outside the list must leave data unchanged; groups cannot be nested.
+- Dragging is available in every sorting mode. A valid move adopts the active profile's displayed order (including referenced shared-group members) and switches to Manual. Cancelled, stale, invalid and no-op drops preserve sorting and saved order. Validate captured data, display order and sorting mode, preserve switch identities, and show group/insert feedback; groups cannot be nested.
 - Dropdowns and name-entry popups close on outside clicks. Keep the live log in its own native viewport, read a bounded tail asynchronously, redact provider secrets, and stop its reader when the window closes.
 
 ### Saved data and providers

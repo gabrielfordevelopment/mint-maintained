@@ -1,8 +1,15 @@
-use super::{Icon, ModData, icons};
-use crate::state::edits::{Edit, ListTarget, PreparedEdit};
+use super::{Icon, ModData, SortBy, icons};
+use crate::state::edits::{ListTarget, PreparedEdit, VisibleOrder};
+
+#[derive(Clone)]
+pub(super) struct DragSnapshot {
+    pub before: ModData,
+    pub order: VisibleOrder,
+    pub sorting: Option<(SortBy, bool)>,
+}
 
 pub(super) struct DraggedEntry {
-    before: ModData,
+    snapshot: DragSnapshot,
     source: ListTarget,
     is_group: bool,
     label: String,
@@ -23,7 +30,7 @@ pub(super) fn can_hover_group(ctx: &egui::Context, profile: &str) -> bool {
 pub(super) fn handle(
     ui: &mut egui::Ui,
     source: ListTarget,
-    before: Option<&ModData>,
+    snapshot: Option<&DragSnapshot>,
     is_group: bool,
     label: &str,
     enabled: bool,
@@ -50,12 +57,12 @@ pub(super) fn handle(
     if enabled
         && ui.is_enabled()
         && response.drag_started()
-        && let Some(before) = before
+        && let Some(snapshot) = snapshot
     {
         egui::DragAndDrop::set_payload(
             ui.ctx(),
             DraggedEntry {
-                before: before.clone(),
+                snapshot: snapshot.clone(),
                 source,
                 is_group,
                 label: std::path::Path::new(label)
@@ -71,9 +78,9 @@ pub(super) fn handle(
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
         }
         response.on_hover_text(if enabled {
-            "Drag to reorder or move between groups"
+            "Drag to reorder or move between groups; a successful move switches to Manual"
         } else {
-            "Select Manual sorting to drag entries"
+            "Dragging is unavailable while an operation is running"
         });
     }
 }
@@ -84,9 +91,14 @@ pub(super) fn finish(
     profile: &str,
     end_index: usize,
     enabled: bool,
+    order: &VisibleOrder,
+    sorting: Option<(SortBy, bool)>,
 ) -> Option<PreparedEdit> {
     let payload = egui::DragAndDrop::payload::<DraggedEntry>(ui.ctx())?;
     if !enabled || !ui.is_enabled() || payload.source.profile != profile {
+        return None;
+    }
+    if payload.snapshot.order != *order || payload.snapshot.sorting != sorting {
         return None;
     }
     let pos = ui.input(|i| i.pointer.interact_pos())?;
@@ -197,12 +209,11 @@ pub(super) fn finish(
     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
     if ui.input(|i| i.pointer.primary_released()) {
         egui::DragAndDrop::clear_payload(ui.ctx());
-        return Some(PreparedEdit::new(
-            &payload.before,
-            Edit::MoveEntry {
-                source: payload.source.clone(),
-                destination,
-            },
+        return Some(PreparedEdit::move_in_visible_order(
+            &payload.snapshot.before,
+            payload.source.clone(),
+            destination,
+            payload.snapshot.order.clone(),
         ));
     }
     if pos.y > ui.clip_rect().bottom() - 24.0 {
