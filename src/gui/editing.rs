@@ -6,7 +6,7 @@ pub(super) struct DeleteConfirmation {
     title: &'static str,
     action: &'static str,
     details: String,
-    focus_cancel: bool,
+    clear_initial_focus: bool,
 }
 
 pub(super) fn skip_delete_confirmation(ctx: &egui::Context) -> bool {
@@ -114,7 +114,7 @@ impl App {
                     "Delete"
                 },
                 details,
-                focus_cancel: true,
+                clear_initial_focus: true,
             });
         } else {
             self.finish_edit(prepared);
@@ -236,8 +236,16 @@ impl App {
                 self.open_profiles
                     .retain(|profile| self.state.mod_data.profiles.contains_key(profile));
                 if changed {
-                    if self.report_save(self.state.mod_data.save()) {
+                    if self.save_mod_data(&description) {
                         tracing::info!("{description}");
+                        if !matches!(
+                            action,
+                            Edit::MoveMod { .. }
+                                | Edit::MoveEntry { .. }
+                                | Edit::SetGroupColor { .. }
+                        ) {
+                            self.notify_edit(description);
+                        }
                     } else {
                         tracing::warn!(
                             "Profile edit applied in memory but could not be saved. {description}"
@@ -269,6 +277,14 @@ impl App {
         let Some(dialog) = &mut self.delete_confirmation else {
             return;
         };
+        if dialog.clear_initial_focus {
+            ctx.memory_mut(|memory| {
+                if let Some(id) = memory.focused() {
+                    memory.surrender_focus(id);
+                }
+            });
+            dialog.clear_initial_focus = false;
+        }
         let response = egui::Modal::new(egui::Id::new("delete-confirmation")).show(ctx, |ui| {
             ui.set_width(420.0_f32.min(ui.ctx().screen_rect().width() - 48.0));
             ui.add_space(8.0);
@@ -287,10 +303,6 @@ impl App {
                             / 2.0,
                     );
                     let cancel = ui.add_sized(button_size, egui::Button::new("Cancel"));
-                    if dialog.focus_cancel {
-                        cancel.request_focus();
-                        dialog.focus_cancel = false;
-                    }
                     (
                         cancel.clicked(),
                         ui.add_enabled_ui(!busy, |ui| {

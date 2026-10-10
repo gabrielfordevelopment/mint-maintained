@@ -4,6 +4,8 @@
 
 ## [Unreleased] - ReleaseDate
 
+- Add dismissible notifications with centered icons, a ten-second progress indicator that pauses on hover, and persistent error details.
+- Add session undo/redo for profile and mod-list edits, with toolbar controls, keyboard shortcuts and an Undo action in editing notifications.
 - Replace the default egui icon with the MINT Maintained M monogram in application windows and the Windows executable.
 - Unify collapsible sections and selection dropdowns with animated SVG chevrons.
 

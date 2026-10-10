@@ -42,8 +42,12 @@ Their MIT license texts are included in `assets/icons/DEPENDENCY_LICENSES.txt`.
 
 ## Material Symbols
 
-The icons in `assets/icons/*.svg` are Google Material Symbols Rounded,
+The icons in `assets/icons/*.svg`, except `notification_*.svg` and
+`history_*.svg`, are Google Material Symbols Rounded,
 outlined, weight 400, optical size 20, licensed under Apache-2.0.
+
+The notification and history icons are original code-authored vector artwork under
+the repository's MIT OR Apache-2.0 license.
 
 Source: https://github.com/google/material-design-icons
 

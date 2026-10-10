@@ -65,6 +65,7 @@ impl App {
             add_deps: Option<Vec<ModSpecification>>,
             edit: Option<Edit>,
             open_group: Option<String>,
+            copied_link: bool,
             rows: Vec<drag_drop::DropRow>,
             header: Option<(egui::Rect, String, usize)>,
         }
@@ -75,6 +76,7 @@ impl App {
             add_deps: None,
             edit: None,
             open_group: None,
+            copied_link: false,
             rows: Vec::new(),
             header: None,
         };
@@ -294,6 +296,7 @@ impl App {
                 }
 
                 if let Some(info) = &info {
+                    let previous_settings = (mc.spec.url.clone(), mc.priority);
                     let dropdown = icons::combo_box("version")
                         .selected_text(
                             self.state
@@ -360,8 +363,11 @@ impl App {
                         );
                     });
 
+                    ctx.needs_save |=
+                        previous_settings.0 != mc.spec.url || previous_settings.1 != mc.priority;
                     if icons::button(ui, Icon::Copy, "Copy URL").clicked() {
                         ui.ctx().copy_text(mc.spec.url.to_string());
+                        ctx.copied_link = true;
                     }
 
                     if mc.enabled {
@@ -459,6 +465,7 @@ impl App {
                 } else {
                     if icons::button(ui, Icon::Copy, "Copy URL").clicked() {
                         ui.ctx().copy_text(mc.spec.url.to_string());
+                        ctx.copied_link = true;
                     }
 
                     let search = searchable_text(&mc.spec.url, &self.search_string, {
@@ -809,7 +816,10 @@ impl App {
         self.scroll_to_match = ctx.scroll_to_match;
 
         if ctx.needs_save {
-            self.report_save(self.state.mod_data.save());
+            self.save_mod_data("Edit mod settings");
+        }
+        if ctx.copied_link {
+            self.notifications.success("Copied mod link.");
         }
         if let Some(name) = ctx.open_group {
             self.groups_window = Some(groups::GroupsWindow::selected(name));

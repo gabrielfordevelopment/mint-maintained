@@ -60,10 +60,18 @@ pub enum Icon {
     Dark,
     System,
     ChevronRight,
+    Check,
+    Close,
+    Undo,
+    Redo,
 }
 
 impl Icon {
     pub fn image(self, ui: &Ui, color: Color32) -> Image<'static> {
+        self.image_sized(ui, color, SIZE)
+    }
+
+    pub fn image_sized(self, ui: &Ui, color: Color32, size: f32) -> Image<'static> {
         let bytes: &[u8] = match self {
             Self::Add => include_bytes!("../../assets/icons/add.svg"),
             Self::Delete => include_bytes!("../../assets/icons/delete.svg"),
@@ -79,9 +87,13 @@ impl Icon {
             Self::Dark => include_bytes!("../../assets/icons/dark_mode.svg"),
             Self::System => include_bytes!("../../assets/icons/desktop_windows.svg"),
             Self::ChevronRight => include_bytes!("../../assets/icons/keyboard_arrow_right.svg"),
+            Self::Check => include_bytes!("../../assets/icons/notification_check.svg"),
+            Self::Close => include_bytes!("../../assets/icons/notification_close.svg"),
+            Self::Undo => include_bytes!("../../assets/icons/history_undo.svg"),
+            Self::Redo => include_bytes!("../../assets/icons/history_redo.svg"),
         };
-        let pixels = (SIZE * ui.ctx().pixels_per_point()).round().max(1.0) as u32;
-        let key = egui::Id::new(("material-icon", self as u8));
+        let pixels = (size * ui.ctx().pixels_per_point()).round().max(1.0) as u32;
+        let key = egui::Id::new(("material-icon", self as u8, size.to_bits()));
         let cached = ui
             .ctx()
             .data(|data| data.get_temp::<(u32, egui::TextureHandle)>(key));
@@ -110,7 +122,7 @@ impl Icon {
                 .data_mut(|data| data.insert_temp(key, (pixels, texture.clone())));
             texture
         };
-        Image::new((texture.id(), Vec2::splat(SIZE))).tint(color)
+        Image::new((texture.id(), Vec2::splat(size))).tint(color)
     }
 }
 

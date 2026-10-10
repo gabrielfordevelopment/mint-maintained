@@ -64,18 +64,36 @@ impl NamedEntries<ModProfile> for ModData {
     }
 }
 
-/// Render and return whether any changes were made
+pub(super) enum Change {
+    Selected,
+    Created(String),
+    Renamed(String),
+    Duplicated(String),
+}
+
+impl Change {
+    pub(super) fn notification(self) -> Option<String> {
+        match self {
+            Self::Selected => None,
+            Self::Created(name) => Some(format!("Created profile \"{name}\".")),
+            Self::Renamed(name) => Some(format!("Renamed profile to \"{name}\".")),
+            Self::Duplicated(name) => Some(format!("Duplicated profile as \"{name}\".")),
+        }
+    }
+}
+
+/// Render and return the completed change, if any.
 pub(crate) fn ui<E, N>(
     ui: &mut egui::Ui,
     name: &str,
     entries: &mut N,
     delete_requested: &mut bool,
     additional_ui: Option<impl FnOnce(&mut egui::Ui, &mut N)>,
-) -> bool
+) -> Option<Change>
 where
     N: NamedEntries<E>,
 {
-    let mut modified = false;
+    let mut modified = None;
     ui.push_id(name, |ui| {
         ui.horizontal(|ui| {
             mk_add(ui, name, entries, &mut modified);
@@ -111,7 +129,7 @@ where
     });
 }
 
-fn mk_add<E, N>(ui: &mut egui::Ui, name: &str, entries: &mut N, modified: &mut bool)
+fn mk_add<E, N>(ui: &mut egui::Ui, name: &str, entries: &mut N, modified: &mut Option<Change>)
 where
     N: NamedEntries<E>,
 {
@@ -131,13 +149,13 @@ where
             |_state| String::new(),
             |entries, name| {
                 entries.add_new(&name);
-                *modified = true;
+                *modified = Some(Change::Created(name));
             },
         );
     });
 }
 
-fn mk_rename<E, N>(ui: &mut egui::Ui, name: &str, entries: &mut N, modified: &mut bool)
+fn mk_rename<E, N>(ui: &mut egui::Ui, name: &str, entries: &mut N, modified: &mut Option<Change>)
 where
     N: NamedEntries<E>,
 {
@@ -157,14 +175,14 @@ where
             response,
             |entries| entries.selected_name().to_string(),
             |entries, name| {
-                entries.rename_selected(name);
-                *modified = true;
+                entries.rename_selected(name.clone());
+                *modified = Some(Change::Renamed(name));
             },
         );
     });
 }
 
-fn mk_duplicate<E, N>(ui: &mut egui::Ui, name: &str, entries: &mut N, modified: &mut bool)
+fn mk_duplicate<E, N>(ui: &mut egui::Ui, name: &str, entries: &mut N, modified: &mut Option<Change>)
 where
     N: NamedEntries<E>,
 {
@@ -181,13 +199,13 @@ where
         response,
         |state| format!("{} - Copy", state.selected_name()),
         |state, name| {
-            state.duplicate_selected(name);
-            *modified = true;
+            state.duplicate_selected(name.clone());
+            *modified = Some(Change::Duplicated(name));
         },
     );
 }
 
-fn mk_dropdown<E, N>(ui: &mut egui::Ui, name: &str, entries: &mut N, modified: &mut bool)
+fn mk_dropdown<E, N>(ui: &mut egui::Ui, name: &str, entries: &mut N, modified: &mut Option<Change>)
 where
     N: NamedEntries<E>,
 {
@@ -205,7 +223,7 @@ where
 
     if selected != entries.selected_name() {
         entries.select(selected);
-        *modified = true;
+        *modified = Some(Change::Selected);
     }
 }
 
