@@ -3,7 +3,7 @@ use super::{ModConfig, ModData_v0_1_0 as ModData, ModGroup, ModOrGroup, StateErr
 #[cfg(test)]
 mod tests;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListTarget {
     pub profile: String,
     pub group: Option<String>,
@@ -31,6 +31,10 @@ pub enum Edit {
         source: ListTarget,
         destination: Option<String>,
     },
+    MoveEntry {
+        source: ListTarget,
+        destination: ListTarget,
+    },
     Ungroup {
         profile: String,
         index: usize,
@@ -43,6 +47,10 @@ pub struct PreparedEdit {
 }
 
 impl PreparedEdit {
+    pub fn action(&self) -> &Edit {
+        &self.edit
+    }
+
     pub fn new(data: &ModData, edit: Edit) -> Self {
         Self {
             before: data.clone(),
@@ -53,7 +61,7 @@ impl PreparedEdit {
     pub fn apply(self, data: &mut ModData) -> Result<(), StateError> {
         if *data != self.before {
             return Err(invalid(
-                "The list changed while confirmation was open. Nothing was deleted; select the item again.",
+                "The list changed during this operation. Nothing was changed; select the item again.",
             ));
         }
         data.apply_edit(self.edit)
@@ -142,6 +150,41 @@ impl ModData {
 
     fn edit_inner(&mut self, edit: Edit) -> Result<(), StateError> {
         match edit {
+            Edit::MoveEntry {
+                source,
+                mut destination,
+            } => {
+                if source.profile != destination.profile {
+                    return Err(invalid("Move entries within the same profile."));
+                }
+                let group_enabled = source.group.as_ref().map(|name| {
+                    self.profiles.get(&source.profile).is_some_and(|profile| profile.mods.iter().any(|entry| matches!(entry, ModOrGroup::Group { group_name, enabled: true } if group_name == name)))
+                }).unwrap_or(true);
+                if source.group == destination.group && source.index < destination.index {
+                    destination.index = destination.index.checked_sub(1).unwrap();
+                }
+                let mut entry = self.remove_entry(&source)?;
+                if let Some(name) = &destination.group {
+                    let ModOrGroup::Individual(config) = entry else {
+                        return Err(invalid("Groups cannot be nested."));
+                    };
+                    self.attach_group(&destination.profile, name)?;
+                    let mods = &mut self.groups.get_mut(name).unwrap().mods;
+                    if destination.index > mods.len() {
+                        return Err(invalid("The destination changed."));
+                    }
+                    mods.insert(destination.index, config);
+                } else {
+                    if let ModOrGroup::Individual(config) = &mut entry {
+                        config.enabled &= group_enabled;
+                    }
+                    let entries = self.profile_entries(&destination.profile)?;
+                    if destination.index > entries.len() {
+                        return Err(invalid("The destination changed."));
+                    }
+                    entries.insert(destination.index, entry);
+                }
+            }
             Edit::DeleteEntry(target) => {
                 self.remove_entry(&target)?;
             }
@@ -199,21 +242,26 @@ impl ModData {
                 if source.group == destination {
                     return Ok(());
                 }
-                let group_enabled = source.group.as_ref().map(|name| {
-                    self.profiles.get(&source.profile).is_some_and(|profile| profile.mods.iter().any(|e| matches!(e, ModOrGroup::Group { group_name, enabled: true } if group_name == name)))
-                }).unwrap_or(true);
-                let ModOrGroup::Individual(mut config) = self.remove_entry(&source)? else {
-                    return Err(invalid("Only individual mods can be moved into a group."));
-                };
-                if let Some(name) = destination {
-                    self.attach_group(&source.profile, &name)?;
-                    self.groups.get_mut(&name).unwrap().mods.push(config);
+                let index = if let Some(name) = &destination {
+                    self.groups
+                        .get(name)
+                        .ok_or_else(|| invalid("The group no longer exists."))?
+                        .mods
+                        .len()
                 } else {
-                    config.enabled &= group_enabled;
-                    let entries = self.profile_entries(&source.profile)?;
-                    let group_index = entries.iter().position(|e| matches!(e, ModOrGroup::Group { group_name, .. } if Some(group_name) == source.group.as_ref())).ok_or_else(|| invalid("The source group is missing."))?;
-                    entries.insert(group_index + 1, ModOrGroup::Individual(config));
-                }
+                    self.profiles.get(&source.profile).ok_or_else(|| invalid("The profile no longer exists."))?.mods.iter()
+                        .position(|entry| matches!(entry, ModOrGroup::Group { group_name, .. } if Some(group_name) == source.group.as_ref()))
+                        .ok_or_else(|| invalid("The source group is missing."))? + 1
+                };
+                let destination = ListTarget {
+                    profile: source.profile.clone(),
+                    group: destination,
+                    index,
+                };
+                self.edit_inner(Edit::MoveEntry {
+                    source,
+                    destination,
+                })?;
             }
             Edit::Ungroup { profile, index } => {
                 let target = ListTarget {

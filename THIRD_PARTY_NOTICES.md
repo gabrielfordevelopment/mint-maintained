@@ -1,5 +1,18 @@
 # UI asset and renderer notices
 
+## Desktop log and window support
+
+The live log uses Chrono 0.4.31 (MIT OR Apache-2.0) for local timestamps.
+Windows title-bar popup dismissal uses raw-window-handle 0.6.2
+(MIT OR Apache-2.0 OR Zlib) to access the existing native window.
+Both packages were already present in the dependency graph; their versions
+are unchanged. Chrono disables default features and enables its clock feature;
+raw-window-handle has no runtime dependencies.
+
+Sources: https://github.com/chronotope/chrono and
+https://github.com/rust-windowing/raw-window-handle.
+Their MIT license texts are included in `assets/icons/DEPENDENCY_LICENSES.txt`.
+
 ## Material Symbols
 
 The icons in `assets/icons/*.svg` are Google Material Symbols Rounded,
@@ -12,7 +25,8 @@ Revision: `737e3324305806514d7909874fa1818ae1808232`
 Upstream path: `symbols/web/<name>/materialsymbolsrounded/<name>_20px.svg`
 
 Included symbols: add, content_copy, dark_mode, delete, desktop_windows,
-drag_handle, error, file_copy, folder, language, light_mode, settings, warning.
+drag_handle, error, file_copy, folder, keyboard_arrow_right, language, light_mode,
+settings, warning.
 
 Modification: an explicit white fill was added for runtime theme tinting.
 The original vector geometry is unchanged. Each file identifies the change.

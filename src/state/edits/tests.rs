@@ -30,6 +30,70 @@ fn target(group: Option<&str>, index: usize) -> ListTarget {
 }
 
 #[test]
+fn indexed_moves_reorder_shared_members_and_reject_invalid_destinations_atomically() {
+    let mut data = fixture();
+    data.apply_edit(Edit::CreateGroup {
+        profile: "default".into(),
+        name: "Shared".into(),
+    })
+    .unwrap();
+    data.apply_edit(Edit::AttachGroup {
+        profile: "other".into(),
+        name: "Shared".into(),
+    })
+    .unwrap();
+    for _ in 0..2 {
+        data.apply_edit(Edit::MoveEntry {
+            source: target(None, 0),
+            destination: target(Some("Shared"), 0),
+        })
+        .unwrap();
+    }
+    assert_eq!(
+        data.groups["Shared"].mods,
+        [config("second"), config("first")]
+    );
+    data.apply_edit(Edit::MoveEntry {
+        source: target(Some("Shared"), 0),
+        destination: target(Some("Shared"), 2),
+    })
+    .unwrap();
+    assert_eq!(
+        data.groups["Shared"].mods,
+        [config("first"), config("second")]
+    );
+    let before = data.clone();
+    for (source, destination) in [
+        (target(None, 0), target(Some("Shared"), 0)),
+        (target(Some("Shared"), 0), target(None, 99)),
+    ] {
+        assert!(
+            data.apply_edit(Edit::MoveEntry {
+                source,
+                destination
+            })
+            .is_err()
+        );
+        assert_eq!(data, before);
+    }
+    if let ModOrGroup::Group { enabled, .. } =
+        &mut data.profiles.get_mut("default").unwrap().mods[0]
+    {
+        *enabled = false;
+    }
+    data.apply_edit(Edit::MoveEntry {
+        source: target(Some("Shared"), 0),
+        destination: target(None, 1),
+    })
+    .unwrap();
+    assert!(
+        matches!(&data.profiles["default"].mods[1], ModOrGroup::Individual(mc) if !mc.enabled && mc.spec.url == "first")
+    );
+    assert_eq!(data.groups["Shared"].mods, [config("second")]);
+    assert_eq!(data.group_users("Shared"), ["default", "other"]);
+}
+
+#[test]
 fn shared_groups_create_move_rename_detach_and_reload() {
     let mut data = fixture();
     data.apply_edit(Edit::CreateGroup {

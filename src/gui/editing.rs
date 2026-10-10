@@ -4,6 +4,7 @@ use crate::state::edits::{Edit, ListTarget, PreparedEdit};
 pub(super) struct DeleteConfirmation {
     edit: PreparedEdit,
     title: &'static str,
+    action: &'static str,
     details: String,
     focus_cancel: bool,
 }
@@ -85,6 +86,11 @@ impl App {
             self.delete_confirmation = Some(DeleteConfirmation {
                 edit: prepared,
                 title,
+                action: if title.starts_with("Remove") {
+                    "Remove"
+                } else {
+                    "Delete"
+                },
                 details,
                 focus_cancel: true,
             });
@@ -103,7 +109,7 @@ impl App {
                 .mods
                 .get(target.index)?;
             Some((
-                "Delete mod?",
+                "Remove mod?",
                 format!(
                     "Remove \"{}\" from shared group \"{group}\"?\nThis affects profiles: {}\nThe mod file will not be deleted.",
                     self.mod_name(config),
@@ -120,7 +126,7 @@ impl App {
                 .get(target.index)?
             {
                 ModOrGroup::Individual(config) => Some((
-                    "Delete mod?",
+                    "Remove mod?",
                     format!(
                         "Remove \"{}\" from profile \"{}\"?\nThe mod file will not be deleted.",
                         self.mod_name(config),
@@ -138,14 +144,87 @@ impl App {
         }
     }
 
-    fn finish_edit(&mut self, edit: PreparedEdit) {
+    pub(super) fn finish_edit(&mut self, edit: PreparedEdit) {
+        let action = edit.action().clone();
+        let before = (**self.state.mod_data).clone();
+        let item = match &action {
+            Edit::DeleteEntry(target)
+            | Edit::MoveMod { source: target, .. }
+            | Edit::MoveEntry { source: target, .. } => {
+                let config = if let Some(group) = &target.group {
+                    before
+                        .groups
+                        .get(group)
+                        .and_then(|group| group.mods.get(target.index))
+                } else {
+                    before
+                        .profiles
+                        .get(&target.profile)
+                        .and_then(|p| p.mods.get(target.index))
+                        .and_then(|entry| match entry {
+                            ModOrGroup::Individual(config) => Some(config),
+                            _ => None,
+                        })
+                };
+                config
+                    .map(|config| self.mod_name(config))
+                    .unwrap_or_else(|| {
+                        before
+                            .profiles
+                            .get(&target.profile)
+                            .and_then(|p| p.mods.get(target.index))
+                            .and_then(|entry| match entry {
+                                ModOrGroup::Group { group_name, .. } => Some(group_name.clone()),
+                                _ => None,
+                            })
+                            .unwrap_or_default()
+                    })
+            }
+            _ => String::new(),
+        };
+        let description = diagnostics::redact(
+            &format!("{action:?}; item={item:?}"),
+            self.state
+                .config
+                .provider_parameters
+                .values()
+                .flat_map(|parameters| parameters.values().cloned()),
+        );
         match edit.apply(&mut self.state.mod_data) {
             Ok(()) => {
+                match &action {
+                    Edit::CreateGroup { profile, name } | Edit::AttachGroup { profile, name } => {
+                        self.group_views.open(profile, name)
+                    }
+                    Edit::MoveEntry {
+                        destination:
+                            ListTarget {
+                                profile,
+                                group: Some(name),
+                                ..
+                            },
+                        ..
+                    } => self.group_views.open(profile, name),
+                    Edit::MoveMod {
+                        source,
+                        destination: Some(name),
+                    } => self.group_views.open(&source.profile, name),
+                    _ => {}
+                }
                 self.open_profiles
                     .retain(|profile| self.state.mod_data.profiles.contains_key(profile));
-                self.report_save(self.state.mod_data.save());
+                if before != **self.state.mod_data {
+                    if self.report_save(self.state.mod_data.save()) {
+                        tracing::info!(operation = %description, "Profile edit saved");
+                    } else {
+                        tracing::warn!(operation = %description, "Profile edit applied in memory but could not be saved");
+                    }
+                }
             }
-            Err(error) => self.last_action = Some(LastAction::failure(error.to_string())),
+            Err(error) => {
+                tracing::warn!(operation = %description, %error, "Profile edit rejected; nothing changed");
+                self.last_action = Some(LastAction::failure(error.to_string()));
+            }
         }
     }
 
@@ -155,23 +234,42 @@ impl App {
             return;
         };
         let response = egui::Modal::new(egui::Id::new("delete-confirmation")).show(ctx, |ui| {
-            ui.set_max_width(440.0);
-            ui.heading(dialog.title);
-            ui.add(egui::Label::new(&dialog.details).wrap());
+            ui.set_width(420.0_f32.min(ui.ctx().screen_rect().width() - 48.0));
+            ui.add_space(8.0);
+            ui.vertical_centered(|ui| {
+                ui.heading(dialog.title);
+                ui.add_space(10.0);
+                ui.add(egui::Label::new(&dialog.details).wrap());
+            });
+            ui.add_space(16.0);
             let (cancel, delete) = ui
                 .horizontal(|ui| {
-                    let cancel = ui.button("Cancel");
+                    let button_size = egui::vec2(88.0, 28.0);
+                    ui.add_space(
+                        (ui.available_width() - 2.0 * button_size.x - ui.spacing().item_spacing.x)
+                            .max(0.0)
+                            / 2.0,
+                    );
+                    let cancel = ui.add_sized(button_size, egui::Button::new("Cancel"));
                     if dialog.focus_cancel {
                         cancel.request_focus();
                         dialog.focus_cancel = false;
                     }
                     (
                         cancel.clicked(),
-                        ui.add_enabled(!busy, egui::Button::new("Delete")).clicked(),
+                        ui.add_enabled_ui(!busy, |ui| {
+                            ui.add_sized(button_size, egui::Button::new(dialog.action))
+                        })
+                        .inner
+                        .clicked(),
                     )
                 })
                 .inner;
-            ui.small("Hold Shift while clicking Delete to skip confirmation.");
+            ui.add_space(12.0);
+            ui.vertical_centered(|ui| {
+                ui.small("Hold Shift while clicking the trash icon to skip confirmation.");
+            });
+            ui.add_space(6.0);
             (cancel, delete)
         });
         if response.inner.0 || response.should_close() {

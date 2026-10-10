@@ -27,6 +27,7 @@ The source types and version declarations are authoritative; do not duplicate sc
 - Preserve the direct-byte deserialization workaround for tagged caches with numeric keys. A `serde_json::Value` round trip is not an interchangeable replacement without representative tests.
 - Preserve saved manual order and the meaning of released sorting fields. Sorting is presentation state, not a migration of stored mod order.
 - Group management uses the existing shared `groups` map and profile references without a schema bump. Rename updates every reference; profile deletion/detachment keeps shared definitions; global group deletion removes all references. Ungroup leaves other profiles unchanged and copies members in place, applying a disabled group flag to the resulting standalone entries.
+- Indexed drag moves use the same validated edit owner, interpreting insertion indices before source removal. Moving out of a disabled group preserves the effective disabled state; moving within a shared group changes that definition for all referring profiles. Reject nested groups, stale source snapshots and invalid destination indices atomically. Drag state and UI identities are transient and do not change the saved schema.
 
 ## Migration procedure and evidence
 

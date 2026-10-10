@@ -193,7 +193,7 @@ where
 {
     let mut selected = entries.selected_name().to_owned();
 
-    egui::ComboBox::from_id_salt(format!("dropdown-{name}"))
+    let dropdown = egui::ComboBox::from_id_salt(format!("dropdown-{name}"))
         .width(ui.available_width())
         .selected_text(selected.clone())
         .show_ui(ui, |ui| {
@@ -201,10 +201,30 @@ where
                 ui.selectable_value(&mut selected, k.to_owned(), k);
             })
         });
+    close_on_outside_press(ui, &dropdown.response);
 
     if selected != entries.selected_name() {
         entries.select(selected);
         *modified = true;
+    }
+}
+
+pub(super) fn close_on_outside_press(ui: &egui::Ui, anchor: &egui::Response) {
+    let popup_id = anchor.id.with("popup");
+    let bounds = ui.memory(|m| {
+        m.is_popup_open(popup_id)
+            .then(|| m.area_rect(popup_id))
+            .flatten()
+    });
+    if let Some(bounds) = bounds
+        && ui.input(|i| {
+            i.pointer.any_pressed()
+                && i.pointer
+                    .interact_pos()
+                    .is_some_and(|p| !anchor.rect.contains(p) && !bounds.contains(p))
+        })
+    {
+        ui.memory_mut(|m| m.close_popup());
     }
 }
 
@@ -234,10 +254,10 @@ fn mk_name_popup<E, N>(
                     popup.buffer = default_name(entries);
                 }
 
-                let res = ui.add(
+                let res = ui.add(super::inputs::bordered(
                     egui::TextEdit::singleline(&mut popup.buffer)
                         .hint_text(format!("Enter new {name} name")),
-                );
+                ));
                 if popup.buffer_needs_prefill_and_focus {
                     res.request_focus();
                 }

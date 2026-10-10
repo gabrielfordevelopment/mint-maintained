@@ -18,6 +18,7 @@ pub enum Icon {
     Light,
     Dark,
     System,
+    ChevronRight,
 }
 
 impl Icon {
@@ -36,6 +37,7 @@ impl Icon {
             Self::Light => include_bytes!("../../assets/icons/light_mode.svg"),
             Self::Dark => include_bytes!("../../assets/icons/dark_mode.svg"),
             Self::System => include_bytes!("../../assets/icons/desktop_windows.svg"),
+            Self::ChevronRight => include_bytes!("../../assets/icons/keyboard_arrow_right.svg"),
         };
         let pixels = (SIZE * ui.ctx().pixels_per_point()).round().max(1.0) as u32;
         let key = egui::Id::new(("material-icon", self as u8));

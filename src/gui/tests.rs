@@ -1,4 +1,5 @@
 use super::*;
+mod drag_drop;
 mod editing;
 use crate::providers::ModResolution;
 use crate::state::ModGroup;
@@ -293,7 +294,7 @@ impl TestApp {
         assert!(self.app.delete_confirmation.is_some());
         self.frame(vec![]);
         let output = self.frame(vec![]);
-        self.click(button_rects(&output, "Delete")[0].center());
+        self.click(button_rects(&output, "Remove")[0].center());
         assert!(self.app.delete_confirmation.is_none());
     }
 }
@@ -493,6 +494,7 @@ fn svg_icons_render_and_refresh_cached_textures_at_display_scale() {
         Icon::Light,
         Icon::Dark,
         Icon::System,
+        Icon::ChevronRight,
     ];
     for scale in [1.0, 1.5, 2.0] {
         context.set_pixels_per_point(scale);

@@ -58,6 +58,158 @@ impl TestApp {
 }
 
 #[test]
+fn edit_logs_distinguish_saved_cancelled_rejected_and_unsaved_changes() {
+    // Isolate tracing's process-wide callsite cache from concurrently rendered GUI tests.
+    if std::env::var_os("MINT_EDIT_LOG_TEST_CHILD").is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "gui::tests::editing::edit_logs_distinguish_saved_cancelled_rejected_and_unsaved_changes", "--nocapture"])
+            .env("MINT_EDIT_LOG_TEST_CHILD", "1")
+            .output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    use crate::state::edits::{Edit, ListTarget};
+    let mut test = TestApp::new();
+    let file = tempfile::tempfile().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(file.try_clone().unwrap())
+        .finish();
+    let guard = tracing::subscriber::set_default(subscriber);
+    test.app.request_edit(
+        Edit::CreateGroup {
+            profile: "default".into(),
+            name: "Logged group".into(),
+        },
+        false,
+    );
+    let config = test.local_mod("logged.pak");
+    test.app
+        .state
+        .mod_data
+        .get_active_profile_mut()
+        .mods
+        .push(ModOrGroup::Individual(config));
+    let target = ListTarget {
+        profile: "default".into(),
+        group: None,
+        index: 1,
+    };
+    test.app
+        .request_edit(Edit::DeleteEntry(target.clone()), false);
+    test.app.delete_confirmation = None;
+    test.app.request_edit(
+        Edit::MoveEntry {
+            source: target.clone(),
+            destination: ListTarget {
+                group: Some("Logged group".into()),
+                index: 0,
+                ..target.clone()
+            },
+        },
+        false,
+    );
+    test.app.request_edit(Edit::DeleteEntry(target), true);
+    let blocked = test.directory.path().join("blocked-save");
+    std::fs::create_dir(&blocked).unwrap();
+    test.app.state.mod_data = crate::state::config::ConfigWrapper::new(
+        blocked,
+        crate::state::VersionAnnotatedModData::V0_1_0((**test.app.state.mod_data).clone()),
+    );
+    test.app.request_edit(
+        Edit::RenameGroup {
+            name: "Logged group".into(),
+            replacement: "Unsaved group".into(),
+        },
+        false,
+    );
+    drop(guard);
+    use std::io::{Read, Seek};
+    let mut file = file;
+    file.rewind().unwrap();
+    let mut log = String::new();
+    file.read_to_string(&mut log).unwrap();
+    assert_eq!(log.matches("Profile edit saved").count(), 2, "{log}");
+    assert!(log.contains("logged.pak"));
+    assert!(log.contains("MoveEntry"));
+    assert!(log.contains("Profile edit rejected; nothing changed"));
+    assert!(log.contains("Profile edit applied in memory but could not be saved"));
+    assert!(test.app.state.mod_data.groups.contains_key("Unsaved group"));
+}
+
+#[test]
+fn profile_popup_closes_when_native_window_loses_focus() {
+    let mut test = TestApp::new();
+    test.full_frame(vec![]);
+    let frame = test.full_frame(vec![]);
+    test.full_click(text_rect(&frame, "default").center(), false);
+    assert!(test.context.memory(|m| m.any_popup_open()));
+    test.full_frame(vec![egui::Event::WindowFocused(false)]);
+    assert!(!test.context.memory(|m| m.any_popup_open()));
+    assert_eq!(test.app.state.mod_data.active_profile, "default");
+}
+
+#[test]
+fn group_management_menu_closes_on_focus_loss() {
+    let mut test = TestApp::new();
+    test.full_button("Groups", false);
+    test.full_button("Manage shared groups", false);
+    test.full_button("Manage", false);
+    let frame = test.full_frame(vec![]);
+    assert_eq!(button_rects(&frame, "Rename group").len(), 1);
+    test.full_frame(vec![egui::Event::WindowFocused(false)]);
+    let frame = test.full_frame(vec![]);
+    assert!(button_rects(&frame, "Rename group").is_empty());
+    assert!(test.app.groups_window.is_some());
+}
+
+#[test]
+fn profile_and_name_popups_close_on_outside_press_without_changing_profiles() {
+    let mut test = TestApp::new();
+    test.app
+        .state
+        .mod_data
+        .profiles
+        .insert("other".into(), Default::default());
+    test.full_frame(vec![]);
+    let frame = test.full_frame(vec![]);
+    test.full_click(text_rect(&frame, "default").center(), false);
+    assert!(test.context.memory(|m| m.any_popup_open()));
+    let outside = egui::pos2(850.0, 450.0);
+    let press = || {
+        vec![
+            egui::Event::PointerMoved(outside),
+            egui::Event::PointerButton {
+                pos: outside,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]
+    };
+    test.full_frame(press());
+    assert!(!test.context.memory(|m| m.any_popup_open()));
+    test.full_frame(vec![egui::Event::PointerButton {
+        pos: outside,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    test.full_button("Add new profile", false);
+    assert!(test.context.memory(|m| m.any_popup_open()));
+    test.full_frame(press());
+    assert!(!test.context.memory(|m| m.any_popup_open()));
+    assert_eq!(test.app.state.mod_data.profiles.len(), 2);
+    assert_eq!(test.app.state.mod_data.active_profile, "default");
+}
+
+#[test]
 fn group_creation_and_context_menu_move_are_wired_to_saved_profile_data() {
     let mut test = TestApp::new();
     let config = test.local_mod("move me.pak");
@@ -165,7 +317,7 @@ fn deletion_confirmation_cancel_escape_enter_and_shift_preserve_files_in_both_th
             assert!(
                 text_rect(
                     &frame,
-                    "Hold Shift while clicking Delete to skip confirmation."
+                    "Hold Shift while clicking the trash icon to skip confirmation."
                 )
                 .is_positive()
             );
@@ -215,7 +367,7 @@ fn confirmation_refuses_stale_targets_and_profile_switches() {
         .get_active_profile_mut()
         .mods
         .swap(0, 1);
-    test.full_button("Delete", false);
+    test.full_button("Remove", false);
     assert_eq!(test.app.state.mod_data.get_active_profile().mods.len(), 2);
     assert!(matches!(
         test.app.last_action.as_ref().unwrap().status,
@@ -228,7 +380,7 @@ fn confirmation_refuses_stale_targets_and_profile_switches() {
         .insert("other".into(), Default::default());
     test.full_button("Delete mod", false);
     test.app.state.mod_data.active_profile = "other".into();
-    test.full_button("Delete", false);
+    test.full_button("Remove", false);
     assert_eq!(test.app.state.mod_data.profiles["default"].mods.len(), 2);
 }
 
@@ -251,7 +403,7 @@ fn group_entry_and_profile_deletion_share_confirmation_and_shift_behavior() {
         });
     test.full_button("Remove group from profile", false);
     assert!(test.app.delete_confirmation.is_some());
-    test.full_button("Delete", false);
+    test.full_button("Remove", false);
     assert!(test.app.state.mod_data.get_active_profile().mods.is_empty());
     assert!(test.app.state.mod_data.groups.contains_key("default"));
     test.full_button("Delete profile", false);
@@ -285,11 +437,14 @@ fn groups_window_is_reachable_and_shared_group_delete_lists_affected_profiles() 
         .insert("second profile".into(), shared_profile);
     test.full_button("Groups", false);
     assert!(test.app.groups_window.is_some());
+    test.full_button("Manage shared groups", false);
+    test.full_button("Manage", false);
     test.full_button("Delete group", false);
     let frame = test.full_frame(vec![]);
     assert!(frame.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().contains("second profile"))));
     test.full_button("Cancel", false);
     assert!(test.app.state.mod_data.groups.contains_key("default"));
+    test.full_button("Manage", false);
     test.full_button("Delete group", true);
     assert!(!test.app.state.mod_data.groups.contains_key("default"));
     test.app.state.mod_data.validate().unwrap();

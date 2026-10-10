@@ -1,12 +1,18 @@
 mod diagnostics;
+mod drag_drop;
 mod editing;
 mod find_string;
+mod group_view;
 mod groups;
 mod icons;
+mod inputs;
 mod lint;
+mod log_window;
 mod message;
 mod mod_list;
 mod named_combobox;
+#[cfg(windows)]
+mod native_popup;
 mod request_counter;
 mod settings;
 mod sorting;
@@ -14,6 +20,11 @@ mod toggle_switch;
 
 #[cfg(test)]
 mod tests;
+
+fn dismiss_popups(ctx: &egui::Context) {
+    ctx.memory_mut(|memory| memory.close_popup());
+    ctx.data_mut(|data| data.remove_by_type::<egui::menu::BarState>());
+}
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -91,6 +102,8 @@ struct StartupApp {
 
 impl StartupApp {
     fn new(cc: &eframe::CreationContext, dirs: Dirs, args: Option<Vec<String>>) -> Self {
+        #[cfg(windows)]
+        native_popup::install(cc);
         let result = App::new(cc, dirs.clone(), args.clone());
         let (app, error) = match result {
             Ok(app) => (Some(app), String::new()),
@@ -167,6 +180,8 @@ pub struct App {
     show_error_details: bool,
     delete_confirmation: Option<editing::DeleteConfirmation>,
     groups_window: Option<groups::GroupsWindow>,
+    log_window: Option<log_window::LogWindow>,
+    group_views: group_view::GroupViews,
 }
 
 #[derive(Default)]
@@ -266,6 +281,8 @@ impl App {
             show_error_details: false,
             delete_confirmation: None,
             groups_window: None,
+            log_window: None,
+            group_views: Default::default(),
         })
     }
 
@@ -435,6 +452,14 @@ struct WindowLintsToggle;
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if ctx.input(|i| {
+            !i.focused
+                || i.events
+                    .iter()
+                    .any(|event| matches!(event, egui::Event::WindowFocused(false)))
+        }) {
+            dismiss_popups(ctx);
+        }
         if self.needs_restart
             && let Some(original_exe_path) = &self.original_exe_path
         {
@@ -753,9 +778,11 @@ impl eframe::App for App {
 
                     let resolve = ui.add_enabled(
                         self.resolve_mod_rid.is_none(),
-                        egui::TextEdit::singleline(&mut self.resolve_mod)
-                            .layouter(&mut multiline_layouter)
-                            .hint_text("Add mod..."),
+                        inputs::bordered(
+                            egui::TextEdit::singleline(&mut self.resolve_mod)
+                                .layouter(&mut multiline_layouter)
+                                .hint_text("Add mod..."),
+                        ),
                     );
                     if is_committed(&resolve) {
                         message::ResolveMods::send(self, ctx, self.parse_mods(), false);
@@ -812,7 +839,7 @@ impl eframe::App for App {
                 let res = ui
                     .scope_builder(
                         egui::UiBuilder::new().layout(egui::Layout::bottom_up(Align::RIGHT)),
-                        |ui| ui.add(text_edit),
+                        |ui| ui.add(inputs::bordered(text_edit)),
                     )
                     .inner;
                 if res.changed() {
@@ -882,6 +909,11 @@ impl eframe::App for App {
             });
         });
         self.show_delete_confirmation(ctx);
+        if let Some(mut window) = self.log_window.take()
+            && window.show(ctx)
+        {
+            self.log_window = Some(window);
+        }
     }
 }
 
@@ -889,7 +921,7 @@ fn is_committed(res: &egui::Response) -> bool {
     res.lost_focus() && res.ctx.input(|i| i.key_pressed(egui::Key::Enter))
 }
 
-/// A custom popup which does not automatically close when clicked.
+/// Name-entry popups stay open while editing and close on outside clicks.
 fn custom_popup_above_or_below_widget<R>(
     ui: &Ui,
     popup_id: egui::Id,
@@ -922,13 +954,18 @@ fn custom_popup_above_or_below_widget<R>(
                         .inner
                     })
                     .inner
-            })
-            .inner;
+            });
 
-        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        if ui.input(|i| {
+            i.key_pressed(egui::Key::Escape)
+                || (i.pointer.any_pressed()
+                    && i.pointer.interact_pos().is_some_and(|p| {
+                        !widget_response.rect.contains(p) && !inner.response.rect.contains(p)
+                    }))
+        }) {
             ui.memory_mut(|mem| mem.close_popup());
         }
-        Some(inner)
+        Some(inner.inner)
     } else {
         None
     }

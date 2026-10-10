@@ -1,11 +1,12 @@
 use super::*;
-use crate::state::edits::{Edit, ListTarget};
+use crate::state::edits::Edit;
 
 #[derive(Default)]
 pub(super) struct GroupsWindow {
     pub selected: String,
     name: String,
     new_name: String,
+    show_management: bool,
 }
 
 impl GroupsWindow {
@@ -14,6 +15,7 @@ impl GroupsWindow {
             selected: name.clone(),
             name,
             new_name: String::new(),
+            show_management: true,
         }
     }
 }
@@ -23,74 +25,60 @@ impl App {
         let Some(mut window) = self.groups_window.take() else {
             return;
         };
-        let names: Vec<_> = self.state.mod_data.groups.keys().cloned().collect();
-        if !names.contains(&window.selected) {
-            window.selected = names.first().cloned().unwrap_or_default();
-            window.name = window.selected.clone();
-        }
         let profile = self.state.mod_data.active_profile.clone();
         let busy = self.editing_busy() || self.delete_confirmation.is_some();
         let mut open = true;
         let mut action = None;
-        egui::Window::new("Groups").open(&mut open).default_width(430.0).show(ctx, |ui| {
+        egui::Window::new("Groups").open(&mut open).default_width(400.0).show(ctx, |ui| {
             ui.add_enabled_ui(!busy, |ui| {
-                ui.label("Groups are shared between profiles. Changes affect every profile listed below.");
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut window.new_name).hint_text("New group name").desired_width(180.0));
+                    let input = ui.add(inputs::bordered(egui::TextEdit::singleline(&mut window.new_name).hint_text("New group name").desired_width(220.0)));
                     let name = window.new_name.trim();
-                    if ui.add_enabled(!name.is_empty() && !names.iter().any(|n| n == name), egui::Button::new("Create group")).clicked() {
+                    let valid = !name.is_empty() && !self.state.mod_data.groups.contains_key(name);
+                    if ui.add_enabled(valid, egui::Button::new("Create group")).clicked() || (valid && is_committed(&input)) {
                         action = Some(Edit::CreateGroup { profile: profile.clone(), name: name.into() });
-                        window.selected = name.into();
-                        window.name = name.into();
                         window.new_name.clear();
                     }
                 });
-                ui.separator();
-                let old_selection = window.selected.clone();
-                egui::ComboBox::from_id_salt("shared-group").selected_text(if window.selected.is_empty() { "Select a group" } else { &window.selected }).show_ui(ui, |ui| {
-                    for name in &names { ui.selectable_value(&mut window.selected, name.clone(), name); }
-                });
-                if old_selection != window.selected { window.name = window.selected.clone(); }
-                if let Some(group) = self.state.mod_data.groups.get(&window.selected) {
-                    let users = self.state.mod_data.group_users(&window.selected);
-                    ui.add(egui::Label::new(format!("Used by: {}", if users.is_empty() { "No profiles".into() } else { users.join(", ") })).wrap());
-                    let attached = users.contains(&profile);
-                    ui.horizontal(|ui| {
-                        if ui.add_enabled(!attached, egui::Button::new("Add to current profile")).clicked() {
-                            action = Some(Edit::AttachGroup { profile: profile.clone(), name: window.selected.clone() });
-                        }
-                        if ui.button("Delete group").clicked() { action = Some(Edit::DeleteGroup(window.selected.clone())); }
-                    });
-                    ui.horizontal(|ui| {
-                        ui.add(egui::TextEdit::singleline(&mut window.name).hint_text("Group name").desired_width(180.0));
-                        let name = window.name.trim();
-                        if ui.add_enabled(!name.is_empty() && name != window.selected && !names.iter().any(|n| n == name), egui::Button::new("Rename group")).clicked() {
-                            action = Some(Edit::RenameGroup { name: window.selected.clone(), replacement: name.into() });
-                            window.selected = name.into();
-                        }
-                    });
-                    ui.separator();
-                    ui.label("Right-click a mod name in the profile to move it into a group.");
-                    if !attached { ui.label("Add this group to the current profile to edit its mod list."); }
-                    if group.mods.is_empty() { ui.label("This group is empty."); }
-                    egui::ScrollArea::vertical().max_height(250.0).show(ui, |ui| {
-                        for (index, config) in group.mods.iter().enumerate() {
-                            ui.push_id(index, |ui| {
+                ui.add_space(6.0);
+                ui.label("Drag mods onto a group in the list. Drag them back to the main list to move them out.");
+                ui.weak("Groups are shared across profiles.");
+                ui.add_space(6.0);
+                egui::CollapsingHeader::new("Manage shared groups").open(window.show_management.then_some(true)).show(ui, |ui| {
+                    egui::ScrollArea::vertical().max_height(280.0).show(ui, |ui| {
+                        for (name, group) in &self.state.mod_data.groups {
+                            ui.push_id(name, |ui| {
+                                let users = self.state.mod_data.group_users(name);
                                 ui.horizontal(|ui| {
-                                    // An unused group can be attached before its entries are edited.
-                                    ui.add_enabled_ui(attached, |ui| {
-                                        if icons::button(ui, Icon::Delete, "Delete mod").clicked() {
-                                            action = Some(Edit::DeleteEntry(ListTarget { profile: profile.clone(), group: Some(window.selected.clone()), index }));
-                                        }
+                                    ui.add(egui::Label::new(format!("{name} ({} mods)", group.mods.len())).truncate());
+                                    if users.contains(&profile) { ui.weak("In this profile"); }
+                                    else if ui.button("Add to profile").clicked() { action = Some(Edit::AttachGroup { profile: profile.clone(), name: name.clone() }); }
+                                    ui.menu_button("Manage", |ui| {
+                                        ui.label(format!("Used by: {}", if users.is_empty() { "No profiles".into() } else { users.join(", ") }));
+                                        if ui.button("Rename group").clicked() { window.selected = name.clone(); window.name = name.clone(); ui.close_menu(); }
+                                        if ui.button("Delete group").clicked() { action = Some(Edit::DeleteGroup(name.clone())); ui.close_menu(); }
                                     });
-                                    ui.add(egui::Label::new(self.mod_name(config)).truncate());
                                 });
+                                if window.selected == *name {
+                                    ui.horizontal(|ui| {
+                                        ui.add(inputs::bordered(egui::TextEdit::singleline(&mut window.name).desired_width(180.0)));
+                                        let replacement = window.name.trim();
+                                        let valid = !replacement.is_empty() && replacement != name && !self.state.mod_data.groups.contains_key(replacement);
+                                        if ui.add_enabled(valid, egui::Button::new("Save name")).clicked() {
+                                            action = Some(Edit::RenameGroup { name: name.clone(), replacement: replacement.into() });
+                                            window.selected.clear();
+                                        }
+                                        if ui.button("Cancel").clicked() { window.selected.clear(); }
+                                    });
+                                }
+                                ui.separator();
                             });
                         }
                     });
-                }
+                });
             });
         });
+        window.show_management = false;
         if open {
             self.groups_window = Some(window);
         }

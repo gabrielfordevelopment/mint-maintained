@@ -70,13 +70,13 @@ impl App {
                             } else {
                                 ui.label(p.name).on_hover_text(p.description);
                             }
-                            let res = ui.add(
+                            let res = ui.add(inputs::bordered(
                                 egui::TextEdit::singleline(
                                     window.parameters.entry(p.id.to_string()).or_default(),
                                 )
                                 .password(true)
                                 .desired_width(200.0),
-                            );
+                            ));
                             if is_committed(&res) {
                                 check = true;
                             }
@@ -138,10 +138,10 @@ impl App {
                         ui.label(job).on_hover_cursor(egui::CursorIcon::Help).on_hover_text("Path to FSD-WindowsNoEditor.pak (FSD-WinGDK.pak for Microsoft Store version)\nLocated inside the \"Deep Rock Galactic\" installation directory under FSD/Content/Paks.");
                         ui.horizontal(|ui| {
                             let res = ui.add(
-                                egui::TextEdit::singleline(
+                                inputs::bordered(egui::TextEdit::singleline(
                                     &mut window.drg_pak_path
                                 )
-                                .desired_width(200.0),
+                                .desired_width(200.0)),
                             );
                             if res.changed() {
                                 window.drg_pak_path_err = None;
@@ -182,11 +182,17 @@ impl App {
                         ui.end_row();
 
                         ui.label("Diagnostics:");
+                        ui.horizontal(|ui| {
+                        if ui.button("Live log").clicked() && self.log_window.is_none() {
+                            let secrets = self.state.config.provider_parameters.values().flat_map(|parameters| parameters.values().cloned()).collect();
+                            self.log_window = Some(log_window::LogWindow::new(ui.ctx().clone(), self.state.dirs.data_dir.join("mint.log"), secrets));
+                        }
                         if ui.button("Open log").clicked()
                             && let Err(error) = opener::open(self.state.dirs.data_dir.join("mint.log"))
                         {
                             self.last_action = Some(LastAction::failure(format!("Could not open the log: {error}")));
                         }
+                        });
                         ui.end_row();
 
                         ui.label("GUI theme:");
