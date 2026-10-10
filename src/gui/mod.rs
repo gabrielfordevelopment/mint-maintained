@@ -6,6 +6,7 @@ mod fonts;
 mod group_colors;
 mod group_view;
 mod groups;
+mod history;
 mod icons;
 mod inputs;
 mod lint;
@@ -15,6 +16,7 @@ mod mod_list;
 mod named_combobox;
 #[cfg(windows)]
 mod native_popup;
+mod notifications;
 mod request_counter;
 mod settings;
 mod sorting;
@@ -38,7 +40,7 @@ use std::{
     path::PathBuf,
 };
 
-use eframe::egui::{CollapsingHeader, RichText};
+use eframe::egui::RichText;
 use eframe::epaint::{Pos2, Vec2};
 use eframe::{
     egui::{FontSelection, Layout, TextFormat, Ui},
@@ -81,6 +83,7 @@ use settings::{WindowProviderParameters, WindowSettings};
 pub fn gui(dirs: Dirs, args: Option<Vec<String>>) -> Result<(), MintError> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
+            .with_icon(icons::app_icon())
             .with_inner_size([900.0, 500.0])
             .with_drag_and_drop(true),
         ..Default::default()
@@ -165,6 +168,8 @@ pub struct App {
     settings_window: Option<WindowSettings>,
     modio_texture_handle: Option<egui::TextureHandle>,
     last_action: Option<LastAction>,
+    notifications: notifications::Notifications,
+    history: history::History,
     available_update: Option<GitHubRelease>,
     show_update_time: Option<SystemTime>,
     open_profiles: HashSet<String>,
@@ -202,18 +207,24 @@ struct LintOptions {
 struct LastAction {
     timestamp: Instant,
     status: LastActionStatus,
+    notified: bool,
+    undo_id: Option<u64>,
 }
 impl LastAction {
     fn success(msg: String) -> Self {
         Self {
             timestamp: Instant::now(),
             status: LastActionStatus::Success(msg),
+            notified: false,
+            undo_id: None,
         }
     }
     fn failure(msg: String) -> Self {
         Self {
             timestamp: Instant::now(),
             status: LastActionStatus::Failure(msg),
+            notified: false,
+            undo_id: None,
         }
     }
     fn timeago(&self) -> String {
@@ -247,6 +258,7 @@ impl App {
     fn load(dirs: Dirs, args: Option<Vec<String>>) -> Result<Self, MintError> {
         let (tx, rx) = mpsc::channel(10);
         let state = State::init(dirs)?;
+        let history = history::History::new(&state.mod_data);
 
         Ok(Self {
             args,
@@ -267,6 +279,8 @@ impl App {
             settings_window: None,
             modio_texture_handle: None,
             last_action: None,
+            notifications: Default::default(),
+            history,
             available_update: None,
             show_update_time: None,
             open_profiles: Default::default(),
@@ -493,6 +507,7 @@ impl eframe::App for App {
         }
 
         // begin draw
+        self.history_shortcuts(ctx);
 
         self.show_update_window(ctx);
         self.show_provider_parameters(ctx);
@@ -712,6 +727,10 @@ impl eframe::App for App {
 
             let mut open_groups = false;
             let mut delete_profile = false;
+            let mut copied_count = None;
+            let mut history_request = None;
+            let history_enabled = self.history_available();
+            let history = &self.history;
             let original_profile = self.state.mod_data.active_profile.clone();
             let buttons = |ui: &mut Ui, mod_data: &mut ModData| {
                 if ui.button("Groups").clicked() {
@@ -723,9 +742,12 @@ impl eframe::App for App {
                     mod_data.for_each_enabled_mod(&active_profile, |mc| {
                         mods.push(mc.clone());
                     });
-                    let mods = Self::build_mod_string(&mods);
-                    ui.ctx().copy_text(mods);
+                    copied_count = Some(mods.len());
+                    if !mods.is_empty() {
+                        ui.ctx().copy_text(Self::build_mod_string(&mods));
+                    }
                 }
+                history_request = history.controls(ui, history_enabled);
 
                 // TODO find better icon, flesh out multiple-view usage, fix GUI locking
                 /*
@@ -739,14 +761,31 @@ impl eframe::App for App {
                 */
             };
 
-            if named_combobox::ui(
+            if let Some(change) = named_combobox::ui(
                 ui,
                 "profile",
                 self.state.mod_data.deref_mut().deref_mut(),
                 &mut delete_profile,
                 Some(buttons),
             ) {
-                self.report_save(self.state.mod_data.save());
+                let text = change.notification();
+                let saved = self.save_mod_data(text.as_deref().unwrap_or("Select profile"));
+                if saved && let Some(text) = text {
+                    self.notify_edit(text);
+                }
+            }
+            if let Some(count) = copied_count {
+                self.notifications.success(if count == 0 {
+                    "No active mod links to copy.".to_owned()
+                } else {
+                    format!(
+                        "Copied {count} active mod {}.\nDisabled mods and groups were excluded.",
+                        if count == 1 { "link" } else { "links" }
+                    )
+                });
+            }
+            if let Some(redo) = history_request {
+                self.restore_history(redo, None);
             }
             if open_groups {
                 self.groups_window = Some(groups::GroupsWindow::default());
@@ -886,6 +925,7 @@ impl eframe::App for App {
             });
         });
         self.show_delete_confirmation(ctx);
+        self.show_notifications(ctx);
         if let Some(mut window) = self.log_window.take()
             && window.show(ctx)
         {

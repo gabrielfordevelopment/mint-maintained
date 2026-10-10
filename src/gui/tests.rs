@@ -1,8 +1,11 @@
 use super::sorting::sorted_mod_indices;
 use super::*;
+mod disclosure;
 mod drag_drop;
 mod editing;
 mod group_colors;
+mod history;
+mod notifications;
 mod sorting_controls;
 mod unicode_text;
 use crate::providers::ModResolution;
@@ -501,6 +504,10 @@ fn svg_icons_render_and_refresh_cached_textures_at_display_scale() {
         Icon::Dark,
         Icon::System,
         Icon::ChevronRight,
+        Icon::Check,
+        Icon::Close,
+        Icon::Undo,
+        Icon::Redo,
     ];
     for scale in [1.0, 1.5, 2.0] {
         context.set_pixels_per_point(scale);
@@ -509,6 +516,7 @@ fn svg_icons_render_and_refresh_cached_textures_at_display_scale() {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     for icon in icons {
                         icons::show(ui, icon);
+                        ui.add(icon.image_sized(ui, Color32::WHITE, 24.0));
                     }
                 });
             });
@@ -519,16 +527,30 @@ fn svg_icons_render_and_refresh_cached_textures_at_display_scale() {
                     data.get_temp::<(u32, egui::TextureHandle)>(egui::Id::new((
                         "material-icon",
                         icon as u8,
+                        icons::SIZE.to_bits(),
                     )))
                 })
                 .unwrap();
             assert_eq!(pixels, (icons::SIZE * scale) as u32);
             assert_eq!(texture.size(), [pixels as usize; 2]);
+            let (large_pixels, large) = context
+                .data(|data| {
+                    data.get_temp::<(u32, egui::TextureHandle)>(egui::Id::new((
+                        "material-icon",
+                        icon as u8,
+                        24.0_f32.to_bits(),
+                    )))
+                })
+                .unwrap();
+            assert_eq!(large_pixels, (24.0 * scale) as u32);
+            assert_eq!(large.size(), [large_pixels as usize; 2]);
+            assert_ne!(large.id(), texture.id());
         }
         let output = context.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 for icon in icons {
                     icons::show(ui, icon);
+                    ui.add(icon.image_sized(ui, Color32::WHITE, 24.0));
                 }
             });
         });

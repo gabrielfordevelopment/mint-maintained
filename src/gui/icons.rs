@@ -3,6 +3,47 @@ use egui::{Color32, Image, Response, Ui, Vec2};
 pub const SIZE: f32 = 16.0;
 const CORNER_RADIUS: u8 = 3;
 
+pub fn app_icon() -> egui::IconData {
+    eframe::icon_data::from_png_bytes(include_bytes!(concat!(env!("OUT_DIR"), "/mint.png")))
+        .expect("Build-generated application icon must be valid PNG")
+}
+
+pub fn collapsing_header(text: impl Into<egui::WidgetText>) -> egui::CollapsingHeader {
+    egui::CollapsingHeader::new(text).icon(|ui, openness, response| {
+        paint_chevron(
+            ui,
+            response.rect,
+            ui.style().interact(response).fg_stroke.color,
+            openness * std::f32::consts::FRAC_PI_2,
+        );
+    })
+}
+
+pub fn combo_box(id_salt: impl std::hash::Hash) -> egui::ComboBox {
+    let animation_id = egui::Id::new(&id_salt).with("chevron");
+    egui::ComboBox::from_id_salt(id_salt).icon(move |ui, rect, visuals, open, _| {
+        let openness = ui
+            .ctx()
+            .animate_bool_responsive(ui.make_persistent_id(animation_id), open);
+        paint_chevron(
+            ui,
+            rect,
+            visuals.fg_stroke.color,
+            std::f32::consts::FRAC_PI_2 + openness * std::f32::consts::PI,
+        );
+    })
+}
+
+fn paint_chevron(ui: &Ui, rect: egui::Rect, color: Color32, angle: f32) {
+    Icon::ChevronRight
+        .image(ui, color)
+        .rotate(angle, Vec2::splat(0.5))
+        .paint_at(
+            ui,
+            egui::Rect::from_center_size(rect.center(), Vec2::splat(SIZE)),
+        );
+}
+
 #[derive(Clone, Copy)]
 pub enum Icon {
     Add,
@@ -19,10 +60,18 @@ pub enum Icon {
     Dark,
     System,
     ChevronRight,
+    Check,
+    Close,
+    Undo,
+    Redo,
 }
 
 impl Icon {
     pub fn image(self, ui: &Ui, color: Color32) -> Image<'static> {
+        self.image_sized(ui, color, SIZE)
+    }
+
+    pub fn image_sized(self, ui: &Ui, color: Color32, size: f32) -> Image<'static> {
         let bytes: &[u8] = match self {
             Self::Add => include_bytes!("../../assets/icons/add.svg"),
             Self::Delete => include_bytes!("../../assets/icons/delete.svg"),
@@ -38,9 +87,13 @@ impl Icon {
             Self::Dark => include_bytes!("../../assets/icons/dark_mode.svg"),
             Self::System => include_bytes!("../../assets/icons/desktop_windows.svg"),
             Self::ChevronRight => include_bytes!("../../assets/icons/keyboard_arrow_right.svg"),
+            Self::Check => include_bytes!("../../assets/icons/notification_check.svg"),
+            Self::Close => include_bytes!("../../assets/icons/notification_close.svg"),
+            Self::Undo => include_bytes!("../../assets/icons/history_undo.svg"),
+            Self::Redo => include_bytes!("../../assets/icons/history_redo.svg"),
         };
-        let pixels = (SIZE * ui.ctx().pixels_per_point()).round().max(1.0) as u32;
-        let key = egui::Id::new(("material-icon", self as u8));
+        let pixels = (size * ui.ctx().pixels_per_point()).round().max(1.0) as u32;
+        let key = egui::Id::new(("material-icon", self as u8, size.to_bits()));
         let cached = ui
             .ctx()
             .data(|data| data.get_temp::<(u32, egui::TextureHandle)>(key));
@@ -69,7 +122,7 @@ impl Icon {
                 .data_mut(|data| data.insert_temp(key, (pixels, texture.clone())));
             texture
         };
-        Image::new((texture.id(), Vec2::splat(SIZE))).tint(color)
+        Image::new((texture.id(), Vec2::splat(size))).tint(color)
     }
 }
 

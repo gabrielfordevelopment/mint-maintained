@@ -81,12 +81,44 @@ async fn import_does_not_duplicate_a_primary_mod_resolved_again_as_a_dependency(
         rid,
         specs: vec![original.clone()],
         result: Ok(crate::providers::ResolvedMods {
-            mods: vec![(original, info.clone()), (canonical.clone(), info)],
+            mods: vec![(original, info.clone()), (canonical.clone(), info.clone())],
             errors: vec![],
         }),
         is_dependency: false,
     }
     .receive(&mut app);
+    assert_eq!(
+        app.state.mod_data.enabled_mods_ordered("default").unwrap(),
+        vec![canonical.clone()]
+    );
+    let imported = app.history.undo_id();
+    assert!(imported.is_some());
+    assert_eq!(app.last_action.as_ref().unwrap().undo_id, imported);
+    app.resolve_mod_rid = Some(pending(&mut app, ()));
+    ResolveMods {
+        rid: app.resolve_mod_rid.as_ref().unwrap().rid,
+        specs: vec![canonical.clone()],
+        result: Ok(crate::providers::ResolvedMods {
+            mods: vec![(canonical.clone(), info)],
+            errors: vec![],
+        }),
+        is_dependency: true,
+    }
+    .receive(&mut app);
+    assert_eq!(app.history.undo_id(), imported);
+    assert!(
+        app.last_action.as_ref().unwrap().undo_id.is_none(),
+        "An unchanged import must not undo a previous edit"
+    );
+    app.restore_history(false, None);
+    assert!(
+        app.state
+            .mod_data
+            .enabled_mods_ordered("default")
+            .unwrap()
+            .is_empty()
+    );
+    app.restore_history(true, None);
     assert_eq!(
         app.state.mod_data.enabled_mods_ordered("default").unwrap(),
         vec![canonical]

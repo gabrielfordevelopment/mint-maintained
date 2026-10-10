@@ -242,7 +242,7 @@ impl App {
                             ui.colored_label(ui.visuals().error_fg_color, error);
                         }
                     });
-                    ui.collapsing("Third-party notices", |ui| {
+                    icons::collapsing_header("Third-party notices").show(ui, |ui| {
                         egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
                             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                             let mut notices = LayoutJob::simple(

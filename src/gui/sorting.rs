@@ -47,7 +47,7 @@ impl App {
             .unwrap_or_default();
         let previous = (category, descending);
         ui.label("Sort by:");
-        egui::ComboBox::from_id_salt("mod-sort-category")
+        icons::combo_box("mod-sort-category")
             .selected_text(category.as_ref().map_or("Manual", SortBy::as_str))
             .width(110.0)
             .show_ui(ui, |ui| {
