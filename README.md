@@ -52,11 +52,11 @@ either local `.pak`s or mod.io mods.
 
 Download a build from this repository's [releases](https://github.com/gabrielfordevelopment/mint-maintained/releases)
 compatible with your architecture. For windows, this will be the
-`mint-x86_64-pc-windows-msvc.zip`. Extract this to anywhere you'd like to keep the
-executable.
+`mint-vX.Y.Z-x86_64-pc-windows-msvc.zip`, where `X.Y.Z` is the release version.
+Extract this to anywhere you'd like to keep the executable.
 
-The first MINT Maintained release has not been published yet. Until then, build from
-source using the instructions below. Update checks and downloads target this repository.
+If no MINT Maintained release is available yet, build from source using the
+instructions below. Update checks and downloads target this repository.
 
 Then, we'll need to perform some first-time setup.
 
@@ -155,17 +155,52 @@ cargo run --locked -- --appdata ../mint-maintained-dev-data
 Using `--appdata` keeps development profiles separate from regular app data. Existing
 MINT data paths and the `mint` executable name are retained for compatibility.
 
-Create feature branches from this repository's `master` and target pull requests here.
-The previously submitted upstream PR branch is retained separately.
+Create feature and fix branches from this repository's `develop` branch and target
+pull requests to `develop` here. The names `dev` and `development` also refer to
+`develop`; they are not separate branches. `master` remains the release branch.
+The previous upstream contributions remain in the commit history. Agent guidance
+is in [AGENTS.md](AGENTS.md), including the repository's Git workflow skill.
+
+Architecture contracts cover [persistence](docs/architecture/persistence.md),
+[desktop UI and background work](docs/architecture/desktop-ui.md), and
+[game integration](docs/architecture/integration.md). For guidance/documentation
+changes, use Python 3.11 or newer to run `python scripts/check_agent_guidance.py`
+and `python -m unittest discover -s scripts/tests`; no Python packages are required.
+The same checks run in CI as `Agent guidance`.
+
+Both `develop` and `master` require a pull request, an up-to-date base, resolved
+review conversations, and successful Windows, Linux, and agent-guidance checks.
+These restrictions also apply to administrators; force pushes and deletion of
+these two branches are disabled. A separate approving reviewer is not required.
+
+Legacy `profiles.json` files are retained as recovery copies after migration.
+Once `mod_data.json` exists, it is authoritative and subsequent edits use that file.
 
 ## Releases
 
-The Release workflow builds Windows and Linux ZIP archives. A manual run produces
-downloadable workflow artifacts without publishing a release. For a public release,
-update the workspace version and changelog on `master`, then push a matching `vX.Y.Z`
-tag. Tag builds create a draft GitHub release after both platform builds succeed;
-review the archives and publish the draft explicitly. Use a version above `0.2.10`
-for the first maintained release so existing version comparisons recognize it.
+The application version is `[workspace.package].version` in `Cargo.toml`, inherited
+by every workspace package. Prepare the version, matching workspace entries in
+`Cargo.lock`, and changelog on a task branch through a PR to `develop`. Use a stable
+version above `0.2.10` for the first maintained release, and increase it for each
+subsequent release. Promote the tested changes through a release PR to `master`.
+Never commit or push directly to either shared branch.
 
-Archives retain the `mint-<target>.zip` names expected by the updater and include the
-project license and third-party notices. No release is published by a normal branch push.
+Once the workflow is on `master`, open **Actions > Release > Run workflow**, select
+**master**, and click **Run workflow**. It reads the committed version, runs the
+Windows/Linux and repository-script checks, builds both platforms, and creates
+the `vX.Y.Z` tag and a draft GitHub release with ZIP downloads and the matching
+version's notes from `CHANGELOG.md`. A missing or empty version section stops the
+workflow before building or creating a tag.
+All jobs use the same commit. No version input, manual tagging, or local build is
+needed. Review the packages and notes, then click **Publish release** when ready.
+
+Downloads are named `mint-vX.Y.Z-x86_64-pc-windows-msvc.zip` and
+`mint-vX.Y.Z-x86_64-unknown-linux-gnu.zip`. Identical `mint-<target>.zip` aliases keep
+the existing updater working. Archives contain root `mint.exe`/`mint`, the project
+license, and third-party notices; Linux executable permissions are preserved.
+
+Existing releases/drafts are never overwritten, and conflicting tags or versions
+not newer than the latest release are rejected. A matching tag without a release
+can be reused when retrying a failed run. Branch merges and tag pushes do not
+start a release. See the [release procedure](.agents/skills/mint-maintained-git-workflow/SKILL.md)
+for version preparation and recovery details.

@@ -1,4 +1,6 @@
 /target
+/artifacts/
 /hook/target
 /.idea
 /result
+__pycache__/

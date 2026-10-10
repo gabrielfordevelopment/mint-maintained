@@ -1,4 +1,10 @@
+use super::sorting::sorted_mod_indices;
 use super::*;
+mod drag_drop;
+mod editing;
+mod group_colors;
+mod sorting_controls;
+mod unicode_text;
 use crate::providers::ModResolution;
 use crate::state::ModGroup;
 
@@ -263,6 +269,7 @@ impl TestApp {
             },
             |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| self.app.ui_profile(ui, "default"));
+                self.app.show_delete_confirmation(ctx);
             },
         )
     }
@@ -285,6 +292,14 @@ impl TestApp {
         let output = self.frame(vec![]);
         self.click(text_rect(&output, name).center());
         self.frame(vec![]);
+    }
+
+    fn confirm_delete(&mut self) {
+        assert!(self.app.delete_confirmation.is_some());
+        self.frame(vec![]);
+        let output = self.frame(vec![]);
+        self.click(button_rects(&output, "Remove")[0].center());
+        assert!(self.app.delete_confirmation.is_none());
     }
 }
 
@@ -351,6 +366,7 @@ fn grouped_profile_renders_every_sort_mode_after_reload() {
         "Group".into(),
         ModGroup {
             mods: vec![zulu, alpha],
+            ..Default::default()
         },
     );
     test.app
@@ -406,6 +422,7 @@ fn sorted_group_uses_local_indices_for_toggle_and_duplicate_removal() {
         "Group".into(),
         ModGroup {
             mods: vec![zulu, alpha],
+            ..Default::default()
         },
     );
     test.app.update_sorting_config(Some(SortBy::Name), false);
@@ -434,6 +451,7 @@ fn sorted_group_uses_local_indices_for_toggle_and_duplicate_removal() {
     assert!(test.app.state.mod_data.groups["Group"].mods[1].enabled);
     let output = test.frame(vec![]);
     test.click(button_rects(&output, "Remove duplicate")[0].center());
+    test.confirm_delete();
     let group = &test.app.state.mod_data.groups["Group"];
     assert_eq!(group.mods.len(), 1);
     assert!(group.mods[0].spec.url.ends_with("zulu.pak"));
@@ -459,6 +477,7 @@ fn sorted_individual_delete_targets_the_displayed_mod() {
     let output = test.frame(vec![]);
     assert!(text_rect(&output, "alpha.pak").top() < text_rect(&output, "zulu.pak").top());
     test.click(button_rects(&output, "Delete mod")[0].center());
+    test.confirm_delete();
     let mods = &test.app.state.mod_data.profiles["default"].mods;
     assert_eq!(mods.len(), 1);
     assert!(matches!(&mods[0], ModOrGroup::Individual(mc) if mc.spec.url.ends_with("zulu.pak")));
@@ -481,6 +500,7 @@ fn svg_icons_render_and_refresh_cached_textures_at_display_scale() {
         Icon::Light,
         Icon::Dark,
         Icon::System,
+        Icon::ChevronRight,
     ];
     for scale in [1.0, 1.5, 2.0] {
         context.set_pixels_per_point(scale);
@@ -538,7 +558,7 @@ fn rows_stay_compact_without_a_header() {
         let alpha = text_rect(&output, "alpha.pak");
         let zulu = text_rect(&output, "zulu.pak");
         assert!(alpha.top() < 15.0);
-        assert!(zulu.top() - alpha.top() <= 22.0);
+        assert!(zulu.top() - alpha.top() <= 23.0);
         assert!(button_rects(&output, "Delete mod")[0].height() <= 20.0);
     }
 }
@@ -639,4 +659,232 @@ fn settings_width_is_stable_when_notices_are_expanded_and_collapsed() {
             assert_eq!(current.height() > initial.height() + 100.0, expanded);
         }
     }
+}
+
+#[test]
+fn failed_settings_save_reports_error_and_preserves_the_original_backup() {
+    let mut test = TestApp::new();
+    let path = test.app.state.dirs.config_dir.join("config.json");
+    let original = std::fs::read(&path).unwrap();
+    let backup = path.with_extension("backup");
+    std::fs::rename(&path, &backup).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    test.app.update_sorting_config(None, false);
+    assert!(matches!(
+        test.app.last_action.as_ref().unwrap().status,
+        LastActionStatus::Failure(_)
+    ));
+    assert_eq!(std::fs::read(backup).unwrap(), original);
+    std::fs::remove_dir(&path).unwrap();
+    test.app.update_sorting_config(Some(SortBy::Name), false);
+    let loaded = State::init(Dirs::from_path(test.directory.path()).unwrap()).unwrap();
+    assert!(matches!(
+        loaded.config.sorting_config.as_ref().unwrap().sort_category,
+        SortBy::Name
+    ));
+}
+
+#[test]
+fn error_details_are_copyable_redacted_and_do_not_enlarge_the_footer() {
+    for theme in [egui::ThemePreference::Light, egui::ThemePreference::Dark] {
+        let mut test = TestApp::new();
+        test.app.has_run_init = true;
+        test.app.state.config.drg_pak_path = None;
+        test.context.set_theme(theme);
+        test.app.state.config.provider_parameters.insert(
+            "fixture".into(),
+            [("oauth".into(), "fixture-private-value".into())].into(),
+        );
+        let details = format!(
+            "Could not install mods\n{}\nfixture-private-value",
+            "Detailed failure with affected mod and path. ".repeat(60)
+        );
+        test.app.last_action = Some(LastAction::failure(details));
+        let context = test.context.clone();
+        let mut frame = |events| {
+            context.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(900.0, 500.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| eframe::App::update(&mut test.app, ctx, &mut eframe::Frame::_new_kittest()),
+            )
+        };
+        frame(vec![]);
+        let output = frame(vec![]);
+        assert!(button_rects(&output, "Open settings")[0].height() <= 20.0);
+        let pos = button_rects(&output, "Details")[0].center();
+        for pressed in [true, false] {
+            frame(vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]);
+        }
+        frame(vec![]);
+        let output = frame(vec![]);
+        let copy = button_rects(&output, "Copy error")[0].center();
+        frame(vec![
+            egui::Event::PointerMoved(copy),
+            egui::Event::PointerButton {
+                pos: copy,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]);
+        let output = frame(vec![egui::Event::PointerButton {
+            pos: copy,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        let copied = output
+            .platform_output
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                egui::OutputCommand::CopyText(text) => Some(text),
+                _ => None,
+            })
+            .expect("Copy error must populate the clipboard");
+        assert!(copied.contains("[redacted]"));
+        assert!(!copied.contains("fixture-private-value"));
+        assert!(copied.len() > 2000);
+    }
+}
+
+#[test]
+fn startup_error_keeps_malformed_data_and_allows_retry_after_repair() {
+    let directory = tempfile::tempdir().unwrap();
+    let dirs = Dirs::from_path(directory.path()).unwrap();
+    let data = dirs.config_dir.join("mod_data.json");
+    std::fs::write(&data, "{broken fixture").unwrap();
+    let context = egui::Context::default();
+    context.enable_accesskit();
+    let mut app = StartupApp::new(
+        &eframe::CreationContext::_new_kittest(context.clone()),
+        dirs,
+        None,
+    );
+    assert!(app.app.is_none());
+    assert_eq!(std::fs::read_to_string(&data).unwrap(), "{broken fixture");
+    std::fs::write(
+        &data,
+        serde_json::to_vec(&crate::state::VersionAnnotatedModData::default()).unwrap(),
+    )
+    .unwrap();
+    let mut frame = |events| {
+        context.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 500.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ctx| eframe::App::update(&mut app, ctx, &mut eframe::Frame::_new_kittest()),
+        )
+    };
+    frame(vec![]);
+    let output = frame(vec![]);
+    let pos = button_rects(&output, "Retry")[0].center();
+    for pressed in [true, false] {
+        frame(vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]);
+    }
+    assert!(app.app.is_some());
+}
+
+#[tokio::test]
+async fn cancel_button_keeps_installation_locked_until_the_worker_finishes() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    let mut test = TestApp::new();
+    test.app.has_run_init = true;
+    test.app.state.config.drg_pak_path = None;
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let worker_cancelled = cancelled.clone();
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let output_path = test.directory.path().join("should-not-be-written");
+    let output = output_path.clone();
+    let handle = tokio::spawn(async move {
+        tokio::task::spawn_blocking(move || {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            if !worker_cancelled.load(Ordering::Acquire) {
+                std::fs::write(output, b"incorrect completion").unwrap();
+            }
+        })
+        .await
+        .unwrap();
+    });
+    test.app.integrate_rid = Some(MessageHandle {
+        rid: test.app.request_counter.next(),
+        handle,
+        state: HashMap::new(),
+        cancellation: Some(cancelled.clone()),
+    });
+    started_rx.await.unwrap();
+    let context = test.context.clone();
+    let mut frame = |events| {
+        context.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 500.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ctx| eframe::App::update(&mut test.app, ctx, &mut eframe::Frame::_new_kittest()),
+        )
+    };
+    frame(vec![]);
+    let output = frame(vec![]);
+    let pos = button_rects(&output, "Cancel")[0].center();
+    for pressed in [true, false] {
+        frame(vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]);
+    }
+    assert!(cancelled.load(Ordering::Acquire));
+    assert!(test.app.integrate_rid.is_some());
+    assert!(
+        !test
+            .app
+            .integrate_rid
+            .as_ref()
+            .unwrap()
+            .handle
+            .is_finished()
+    );
+    release_tx.send(()).unwrap();
+    test.app.integrate_rid.take().unwrap().handle.await.unwrap();
+    assert!(!output_path.exists());
 }

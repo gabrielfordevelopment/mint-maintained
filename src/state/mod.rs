@@ -1,4 +1,10 @@
 pub mod config;
+pub mod edits;
+mod settings;
+pub use settings::{GuiTheme, SortBy};
+
+#[cfg(test)]
+mod persistence_tests;
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -12,16 +18,15 @@ use serde::{Deserialize, Serialize};
 use snafu::prelude::*;
 
 use self::config::ConfigWrapper;
+use crate::providers::ProviderError;
 use crate::{
     Dirs,
-    gui::GuiTheme,
     providers::{ModSpecification, ModStore},
 };
-use crate::{gui::SortBy, providers::ProviderError};
 use mint_lib::{DRGInstallation, mod_info::MetaConfig};
 
 /// Mod configuration, holds ModSpecification as well as other metadata
-#[derive(Debug, Clone, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ModConfig {
     pub spec: ModSpecification,
     pub required: bool,
@@ -40,29 +45,81 @@ fn is_zero(value: &i32) -> bool {
     *value == 0
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ModGroup {
     pub mods: Vec<ModConfig>,
+    #[serde(default, skip_serializing_if = "GroupColor::is_default")]
+    pub color: GroupColor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, strum::EnumIter)]
+#[serde(rename_all = "snake_case")]
+pub enum GroupColor {
+    #[default]
+    Gray,
+    Rose,
+    Red,
+    Orange,
+    Amber,
+    Lime,
+    Green,
+    Teal,
+    Cyan,
+    Sky,
+    Blue,
+    Indigo,
+    Violet,
+    Purple,
+    Pink,
+}
+
+impl GroupColor {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 #[obake::versioned]
 #[obake(version("0.0.0"))]
 #[obake(version("0.1.0"))]
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ModProfile {
     #[obake(cfg("0.0.0"))]
     pub mods: Vec<ModConfig>,
 
-    /// A profile can contain ordered individual mods mixed with mod groups.
+    /// Standalone mods precede groups; older mixed profiles require explicit arrangement.
     #[obake(cfg("0.1.0"))]
     pub mods: Vec<ModOrGroup>,
 }
 
-#[derive(Debug, Clone, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ModOrGroup {
     Group { group_name: String, enabled: bool },
     Individual(ModConfig),
+}
+
+impl ModProfile_v0_1_0 {
+    pub fn group_start(&self) -> usize {
+        self.mods
+            .iter()
+            .position(|entry| matches!(entry, ModOrGroup::Group { .. }))
+            .unwrap_or(self.mods.len())
+    }
+
+    pub fn has_mixed_order(&self) -> bool {
+        self.mods[self.group_start()..]
+            .iter()
+            .any(|entry| matches!(entry, ModOrGroup::Individual(_)))
+    }
+
+    pub fn insertion_index(&self, index: usize, is_group: bool) -> usize {
+        if is_group {
+            index.max(self.group_start())
+        } else {
+            index.min(self.group_start())
+        }
+    }
 }
 
 impl From<ModProfile!["0.0.0"]> for ModProfile!["0.1.0"] {
@@ -75,7 +132,7 @@ impl From<ModProfile!["0.0.0"]> for ModProfile!["0.1.0"] {
 #[obake::versioned]
 #[obake(version("0.0.0"))]
 #[obake(version("0.1.0"))]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModData {
     pub active_profile: String,
     #[obake(cfg("0.0.0"))]
@@ -87,6 +144,39 @@ pub struct ModData {
 }
 
 impl ModData!["0.1.0"] {
+    pub fn validate(&self) -> Result<(), StateError> {
+        if !self.profiles.contains_key(&self.active_profile) {
+            return Err(StateError::InvalidModData {
+                message: format!("active profile {:?} does not exist", self.active_profile),
+            });
+        }
+        for (name, profile) in &self.profiles {
+            for entry in &profile.mods {
+                if let ModOrGroup::Group { group_name, .. } = entry
+                    && !self.groups.contains_key(group_name)
+                {
+                    return Err(StateError::InvalidModData {
+                        message: format!("profile {name:?} refers to missing group {group_name:?}"),
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn enabled_mods_ordered(&self, profile: &str) -> Result<Vec<ModSpecification>, StateError> {
+        self.validate()?;
+        if !self.profiles.contains_key(profile) {
+            return Err(StateError::InvalidModData {
+                message: format!("profile {profile:?} does not exist"),
+            });
+        }
+        let mut mods = Vec::new();
+        self.for_each_enabled_mod(profile, |mc| mods.push(mc.clone()));
+        mods.sort_by_key(|mc| std::cmp::Reverse(mc.priority));
+        Ok(mods.into_iter().map(|mc| mc.spec).collect())
+    }
+
     pub fn for_each_mod_predicate<
         F: FnMut(&ModConfig),
         G: FnMut(bool /* mod group enabled? */) -> bool,
@@ -266,11 +356,24 @@ pub enum VersionAnnotatedModData {
     V0_1_0(ModData!["0.1.0"]),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub enum MaybeVersionedModData {
     Versioned(VersionAnnotatedModData),
     Legacy(ModData!["0.0.0"]),
+}
+
+impl<'de> Deserialize<'de> for MaybeVersionedModData {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        // A failed versioned read must not fall back to legacy data and discard groups.
+        if value.get("version").is_some() {
+            serde_json::from_value(value).map(Self::Versioned)
+        } else {
+            serde_json::from_value(value).map(Self::Legacy)
+        }
+        .map_err(serde::de::Error::custom)
+    }
 }
 
 impl Default for ModData!["0.0.0"] {
@@ -425,6 +528,10 @@ impl From<&VersionAnnotatedConfig> for MetaConfig {
 
 #[derive(Debug, Snafu)]
 pub enum StateError {
+    #[snafu(display("{message}"))]
+    InvalidEdit { message: String },
+    #[snafu(display("invalid mod_data.json: {message}. The original file has been preserved"))]
+    InvalidModData { message: String },
     #[snafu(display("failed to deserialize user config"))]
     CfgDeserializationFailed { source: serde_json::Error },
     #[snafu(display("unsupported config version"))]
@@ -459,14 +566,14 @@ impl State {
         let config_path = dirs.config_dir.join("config.json");
 
         let config = read_config_or_default(&config_path)?;
-        let config = ConfigWrapper::<VersionAnnotatedConfig>::new(&config_path, config);
-        config.save().unwrap();
-
         let legacy_mod_profiles_path = dirs.config_dir.join("profiles.json");
         let mod_data_path = dirs.config_dir.join("mod_data.json");
         let mod_data = read_mod_data_or_default(&mod_data_path, legacy_mod_profiles_path)?;
+
+        let config = ConfigWrapper::<VersionAnnotatedConfig>::new(&config_path, config);
+        config.save()?;
         let mod_data = ConfigWrapper::<VersionAnnotatedModData>::new(mod_data_path, mod_data);
-        mod_data.save().unwrap();
+        mod_data.save()?;
 
         let store = ModStore::new(&dirs.cache_dir, &config.provider_parameters)?.into();
 
@@ -512,12 +619,8 @@ fn read_mod_data_or_default(
             .context(ModDataDeserializationFailedSnafu)?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             match fs::read(&legacy_mod_profiles_path) {
-                Ok(buf) => {
-                    let mod_data = serde_json::from_slice::<MaybeVersionedModData>(&buf)
-                        .context(LegacyProfilesDeserializationFailedSnafu)?;
-                    fs::remove_file(&legacy_mod_profiles_path)?;
-                    mod_data
-                }
+                Ok(buf) => serde_json::from_slice::<MaybeVersionedModData>(&buf)
+                    .context(LegacyProfilesDeserializationFailedSnafu)?,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                     MaybeVersionedModData::default()
                 }
@@ -535,6 +638,7 @@ fn read_mod_data_or_default(
         },
     };
 
+    mod_data.validate()?;
     Ok(mod_data)
 }
 
@@ -587,6 +691,7 @@ mod mod_data_tests {
                 "mg1".to_string(),
                 ModGroup {
                     mods: vec![mod_2, mod_3],
+                    ..Default::default()
                 },
             )]
             .into(),
@@ -641,6 +746,7 @@ mod mod_data_tests {
                 "mg1".to_string(),
                 ModGroup {
                     mods: vec![mod_2, mod_3],
+                    ..Default::default()
                 },
             )]
             .into(),
@@ -695,6 +801,7 @@ mod mod_data_tests {
                 "mg1".to_string(),
                 ModGroup {
                     mods: vec![mod_2, mod_3],
+                    ..Default::default()
                 },
             )]
             .into(),

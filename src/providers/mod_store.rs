@@ -13,6 +13,12 @@ pub struct ModStore {
     blob_cache: BlobCache,
 }
 
+#[derive(Debug, Default)]
+pub struct ResolvedMods {
+    pub mods: Vec<(ModSpecification, ModInfo)>,
+    pub errors: Vec<(ModSpecification, ProviderError)>,
+}
+
 impl ModStore {
     pub fn new<P: AsRef<Path>>(
         cache_path: P,
@@ -23,10 +29,7 @@ impl ModStore {
             let params = parameters.get(prov.id).cloned().unwrap_or_default();
             if prov.parameters.iter().all(|p| params.contains_key(p.id)) {
                 let Ok(provider) = (prov.new)(&params) else {
-                    return Err(ProviderError::InitProviderFailed {
-                        id: prov.id,
-                        parameters: params.to_owned(),
-                    });
+                    return Err(ProviderError::InitProviderFailed { id: prov.id });
                 };
                 providers.insert(prov.id, provider);
             }
@@ -36,7 +39,12 @@ impl ModStore {
 
         let cache = read_cache_metadata_or_default(&cache_metadata_path)?;
         let cache = ConfigWrapper::new(&cache_metadata_path, cache);
-        cache.save().unwrap();
+        cache
+            .save()
+            .map_err(|error| ProviderError::CacheSaveFailed {
+                path: cache_metadata_path,
+                message: error.to_string(),
+            })?;
 
         Ok(Self {
             providers: RwLock::new(providers),
@@ -98,39 +106,53 @@ impl ModStore {
         mods: &[ModSpecification],
         update: bool,
     ) -> Result<HashMap<ModSpecification, ModInfo>, ProviderError> {
-        use futures::stream::{self, StreamExt, TryStreamExt};
+        let resolved = self.resolve_mods_partial(mods, update).await;
+        if let Some((_, error)) = resolved.errors.into_iter().next() {
+            return Err(error);
+        }
+        Ok(resolved.mods.into_iter().collect())
+    }
 
-        let mut to_resolve = mods.iter().cloned().collect::<HashSet<ModSpecification>>();
-        let mut mods_map = HashMap::new();
-
-        // used to deduplicate dependencies from mods already present in the mod list
-        let mut precise_mod_specs = HashSet::new();
-
-        while !to_resolve.is_empty() {
-            for (u, m) in stream::iter(
-                to_resolve
-                    .iter()
-                    .map(|u| self.resolve_mod(u.to_owned(), update)),
-            )
-            .boxed()
-            .buffer_unordered(5)
-            .try_collect::<Vec<_>>()
-            .await?
-            {
-                precise_mod_specs.insert(m.spec.clone());
-                mods_map.insert(u, m);
-                to_resolve.clear();
-                for m in mods_map.values() {
-                    for d in &m.suggested_dependencies {
-                        if !precise_mod_specs.contains(d) {
-                            to_resolve.insert(d.clone());
-                        }
+    pub async fn resolve_mods_partial(
+        &self,
+        mods: &[ModSpecification],
+        update: bool,
+    ) -> ResolvedMods {
+        use futures::stream::{self, StreamExt};
+        let mut queued = HashSet::new();
+        let mut pending: Vec<_> = mods
+            .iter()
+            .filter(|spec| queued.insert((*spec).clone()))
+            .cloned()
+            .collect();
+        let mut result = ResolvedMods::default();
+        while !pending.is_empty() {
+            let batch = stream::iter(pending.into_iter().map(|spec| async move {
+                let resolved = self.resolve_mod(spec.clone(), update).await;
+                (spec, resolved)
+            }))
+            .buffered(5)
+            .collect::<Vec<_>>()
+            .await;
+            pending = Vec::new();
+            for (spec, resolved) in batch {
+                match resolved {
+                    Ok((original, info)) => {
+                        queued.insert(info.spec.clone());
+                        let mut dependencies = info.suggested_dependencies.clone();
+                        dependencies.sort();
+                        pending.extend(
+                            dependencies
+                                .into_iter()
+                                .filter(|dep| queued.insert(dep.clone())),
+                        );
+                        result.mods.push((original, info));
                     }
+                    Err(error) => result.errors.push((spec, error)),
                 }
             }
         }
-
-        Ok(mods_map)
+        result
     }
 
     pub async fn resolve_mod(
@@ -208,9 +230,21 @@ impl ModStore {
 
     pub async fn update_cache(&self) -> Result<(), ProviderError> {
         let providers = self.providers.read().unwrap().clone();
+        let mut failures = Vec::new();
         for (name, provider) in providers.iter() {
             info!("updating cache for {name} provider");
-            provider.update_cache(self.cache.clone()).await?;
+            if let Err(error) = provider.update_cache(self.cache.clone()).await {
+                failures.push(format!("{name}: {error}"));
+            }
+        }
+        if let Err(error) = self.cache.read().unwrap().save() {
+            failures.push(format!("Updated metadata could not be saved: {error}"));
+        }
+        if !failures.is_empty() {
+            failures.sort();
+            return Err(ProviderError::PartialUpdate {
+                failures: failures.join("\n"),
+            });
         }
         Ok(())
     }

@@ -1,11 +1,28 @@
 name: Run checks
 
-on: [push, pull_request, workflow_dispatch]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
 jobs:
+  agent-guidance:
+    name: Agent guidance
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Validate agent guidance
+        run: python scripts/check_agent_guidance.py
+      - name: Test repository scripts
+        run: python -m unittest discover -s scripts/tests
+
   check:
     strategy:
       fail-fast: false

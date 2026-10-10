@@ -1,3 +1,8 @@
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
+#[cfg(target_os = "windows")]
+mod windows_startup;
+
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
@@ -84,7 +89,7 @@ enum Action {
 }
 
 #[derive(Parser, Debug)]
-#[command(author, version=mint_lib::built_info::GIT_VERSION.unwrap())]
+#[command(author, version=mint_lib::built_info::version())]
 struct Args {
     #[command(subcommand)]
     action: Option<Action>,
@@ -97,6 +102,7 @@ struct Args {
 fn main() -> Result<()> {
     #[cfg(target_os = "windows")]
     {
+        windows_startup::attach_parent_console();
         // Try to enable ANSI code support on Windows 10 for console. If it fails, then whatever
         // *shrugs*.
         let _res = ansi_term::enable_ansi_support();
@@ -216,10 +222,7 @@ async fn action_integrate_profile(dirs: Dirs, action: ActionIntegrateProfile) ->
     let game_pak_path = get_pak_path(&state, &action.fsd_pak)?;
     debug!(?game_pak_path);
 
-    let mut mods = Vec::new();
-    state.mod_data.for_each_enabled_mod(&action.profile, |mc| {
-        mods.push(mc.spec.clone());
-    });
+    let mods = state.mod_data.enabled_mods_ordered(&action.profile)?;
 
     resolve_unordered_and_integrate_with_provider_init(
         game_pak_path,
