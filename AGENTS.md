@@ -14,10 +14,14 @@
 | Location | Responsibility |
 | --- | --- |
 | `src/main.rs`, `src/lib.rs` | CLI, startup, application directories, shared application helpers |
-| `src/gui/mod.rs`, `src/gui/message.rs` | egui application, sorting and row actions, asynchronous operation dispatch and results |
+| `src/gui/mod.rs`, `src/gui/message.rs` | egui application shell, asynchronous operation dispatch and results |
+| `src/gui/mod_list.rs`, `sorting.rs`, `settings.rs`, `lint.rs` | Mod rows, display ordering, settings/provider dialogs, lint selection and reports |
+| `src/gui/editing.rs`, `groups.rs`, `src/state/edits.rs` | Deletion confirmation, shared-group management, validated profile/group operations |
+| `src/gui/drag_drop.rs`, `src/gui/log_window.rs` | Drag targets and feedback; bounded asynchronous log reader and native log viewport |
 | `src/gui/icons.rs`, `assets/icons/` | Shared SVG controls, display-scale-aware texture caching, icon sources and licenses |
 | `src/gui/named_combobox.rs`, `src/gui/tests.rs` | Profile/group controls and GUI interaction/sorting regression tests |
-| `src/state/` | Settings, profiles, groups, versioned serialization, migrations, JSON persistence |
+| `src/state/`, `src/state/settings.rs` | Settings types, profiles, groups, versioned serialization, migrations, JSON persistence |
+| `src/windows_startup.rs` | Windows parent-console attachment while preserving redirected CLI streams |
 | `src/providers/` | Local/HTTP/mod.io providers, metadata and blob caches, dependency resolution and downloads |
 | `src/integrate.rs`, `src/mod_lints/` | Game pak integration, hook installation/uninstallation, mod validation |
 | `mint_lib/` | Shared mod/game contracts, installation discovery, logging, update URLs and build metadata |
@@ -41,11 +45,16 @@
 
 - Preserve the compact layout, row heights, control order, and placement unless a layout change is requested. Do not add a table header or enlarge controls as incidental polish.
 - Reuse the SVG controls in `src/gui/icons.rs`; keep vector sources in `assets/icons/`. Avoid Unicode stand-ins for existing icons and unnecessary texture regeneration each frame.
-- Add/delete icons use the normal theme foreground; green/red feedback belongs to hover and pressed states. Theme selection uses the standard egui selection highlight. Preserve button padding, footer alignment, keyboard interaction, and focus feedback.
+- In both themes, add buttons use blue backgrounds with white icons, and delete buttons use red backgrounds with white icons/text, including deletion confirmation. Hover/pressed states darken these fills; disabled controls retain disabled styling. Preserve standard egui theme selection, button padding, footer alignment, keyboard interaction and focus feedback.
 - Sorting must preserve saved manual order and group boundaries. Sort individual runs and group children within their own scope; use stored indices and group identity for row actions rather than sorted display positions.
+- New and explicitly arranged profiles keep standalone mods before all groups. Clamp root drag targets to the appropriate section and show the actual insertion boundary. Never silently reorder old mixed profiles: require the Arrange groups confirmation before structural group edits or dragging; Cancel preserves their saved load order. Non-structural edits and imports remain available.
 - Missing metadata is a supported state, including adjacent mods where one or both lack metadata. Comparators must remain deterministic and consistent. Cover these cases when changing sorting.
 - Preserve the persisted interpretation of sorting settings, including the existing `is_ascending` field, unless an explicit behavior change includes compatibility handling.
 - Keep network, downloads, and integration work outside the UI frame. Preserve request-ID checks that prevent stale asynchronous results from replacing current state.
+- Route destructive profile/list/group actions through `src/state/edits.rs` and the shared GUI confirmation path. Normal clicks confirm; Shift at the originating click bypasses confirmation. Cancel/Escape must preserve data, and stale confirmations must not act on changed lists.
+- Groups are shared across profiles. Removing a group row detaches only that profile reference; deleting a shared group removes it and its references globally. Ungroup copies members into that profile in order and preserves their effective enabled state. Show affected profiles before global/shared deletion; never delete downloaded files as part of list editing.
+- Dragging is available in every sorting mode. A valid move adopts the active profile's displayed order (including referenced shared-group members) and switches to Manual. Cancelled, stale, invalid and no-op drops preserve sorting and saved order. Validate captured data, display order and sorting mode, preserve switch identities, and show group/insert feedback; groups cannot be nested.
+- Dropdowns and name-entry popups close on outside clicks. Keep the live log in its own native viewport, read a bounded tail asynchronously, redact provider secrets, and stop its reader when the window closes.
 
 ### Saved data and providers
 

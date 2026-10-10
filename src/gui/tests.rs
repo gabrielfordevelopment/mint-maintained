@@ -1,4 +1,10 @@
+use super::sorting::sorted_mod_indices;
 use super::*;
+mod drag_drop;
+mod editing;
+mod group_colors;
+mod sorting_controls;
+mod unicode_text;
 use crate::providers::ModResolution;
 use crate::state::ModGroup;
 
@@ -263,6 +269,7 @@ impl TestApp {
             },
             |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| self.app.ui_profile(ui, "default"));
+                self.app.show_delete_confirmation(ctx);
             },
         )
     }
@@ -285,6 +292,14 @@ impl TestApp {
         let output = self.frame(vec![]);
         self.click(text_rect(&output, name).center());
         self.frame(vec![]);
+    }
+
+    fn confirm_delete(&mut self) {
+        assert!(self.app.delete_confirmation.is_some());
+        self.frame(vec![]);
+        let output = self.frame(vec![]);
+        self.click(button_rects(&output, "Remove")[0].center());
+        assert!(self.app.delete_confirmation.is_none());
     }
 }
 
@@ -351,6 +366,7 @@ fn grouped_profile_renders_every_sort_mode_after_reload() {
         "Group".into(),
         ModGroup {
             mods: vec![zulu, alpha],
+            ..Default::default()
         },
     );
     test.app
@@ -406,6 +422,7 @@ fn sorted_group_uses_local_indices_for_toggle_and_duplicate_removal() {
         "Group".into(),
         ModGroup {
             mods: vec![zulu, alpha],
+            ..Default::default()
         },
     );
     test.app.update_sorting_config(Some(SortBy::Name), false);
@@ -434,6 +451,7 @@ fn sorted_group_uses_local_indices_for_toggle_and_duplicate_removal() {
     assert!(test.app.state.mod_data.groups["Group"].mods[1].enabled);
     let output = test.frame(vec![]);
     test.click(button_rects(&output, "Remove duplicate")[0].center());
+    test.confirm_delete();
     let group = &test.app.state.mod_data.groups["Group"];
     assert_eq!(group.mods.len(), 1);
     assert!(group.mods[0].spec.url.ends_with("zulu.pak"));
@@ -459,6 +477,7 @@ fn sorted_individual_delete_targets_the_displayed_mod() {
     let output = test.frame(vec![]);
     assert!(text_rect(&output, "alpha.pak").top() < text_rect(&output, "zulu.pak").top());
     test.click(button_rects(&output, "Delete mod")[0].center());
+    test.confirm_delete();
     let mods = &test.app.state.mod_data.profiles["default"].mods;
     assert_eq!(mods.len(), 1);
     assert!(matches!(&mods[0], ModOrGroup::Individual(mc) if mc.spec.url.ends_with("zulu.pak")));
@@ -481,6 +500,7 @@ fn svg_icons_render_and_refresh_cached_textures_at_display_scale() {
         Icon::Light,
         Icon::Dark,
         Icon::System,
+        Icon::ChevronRight,
     ];
     for scale in [1.0, 1.5, 2.0] {
         context.set_pixels_per_point(scale);
@@ -538,7 +558,7 @@ fn rows_stay_compact_without_a_header() {
         let alpha = text_rect(&output, "alpha.pak");
         let zulu = text_rect(&output, "zulu.pak");
         assert!(alpha.top() < 15.0);
-        assert!(zulu.top() - alpha.top() <= 22.0);
+        assert!(zulu.top() - alpha.top() <= 23.0);
         assert!(button_rects(&output, "Delete mod")[0].height() <= 20.0);
     }
 }

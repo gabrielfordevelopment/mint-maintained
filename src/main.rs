@@ -1,3 +1,8 @@
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
+#[cfg(target_os = "windows")]
+mod windows_startup;
+
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
@@ -97,6 +102,7 @@ struct Args {
 fn main() -> Result<()> {
     #[cfg(target_os = "windows")]
     {
+        windows_startup::attach_parent_console();
         // Try to enable ANSI code support on Windows 10 for console. If it fails, then whatever
         // *shrugs*.
         let _res = ansi_term::enable_ansi_support();

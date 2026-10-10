@@ -1,6 +1,94 @@
 use super::*;
 
 #[test]
+fn group_colors_default_for_old_data_and_survive_reload_and_rename() {
+    use crate::state::edits::Edit;
+    let old: ModGroup = serde_json::from_str(r#"{"mods":[]}"#).unwrap();
+    assert_eq!(old.color, GroupColor::Gray);
+    assert_eq!(
+        serde_json::to_value(&old).unwrap(),
+        serde_json::json!({"mods": []})
+    );
+    let directory = tempfile::tempdir().unwrap();
+    let dirs = Dirs::from_path(directory.path()).unwrap();
+    let mut state = State::init(dirs.clone()).unwrap();
+    state
+        .mod_data
+        .profiles
+        .insert("second".into(), Default::default());
+    state
+        .mod_data
+        .apply_edit(Edit::CreateGroup {
+            profile: "default".into(),
+            name: "Shared".into(),
+        })
+        .unwrap();
+    state
+        .mod_data
+        .apply_edit(Edit::AttachGroup {
+            profile: "second".into(),
+            name: "Shared".into(),
+        })
+        .unwrap();
+    state
+        .mod_data
+        .apply_edit(Edit::SetGroupColor {
+            name: "Shared".into(),
+            color: GroupColor::Blue,
+        })
+        .unwrap();
+    state
+        .mod_data
+        .apply_edit(Edit::RenameGroup {
+            name: "Shared".into(),
+            replacement: "Renamed".into(),
+        })
+        .unwrap();
+    state.mod_data.save().unwrap();
+    let loaded = State::init(dirs).unwrap();
+    assert_eq!(loaded.mod_data.groups["Renamed"].color, GroupColor::Blue);
+    assert_eq!(
+        loaded.mod_data.group_users("Renamed"),
+        ["default", "second"]
+    );
+    let before = (**state.mod_data).clone();
+    assert!(
+        state
+            .mod_data
+            .apply_edit(Edit::SetGroupColor {
+                name: "missing".into(),
+                color: GroupColor::Red
+            })
+            .is_err()
+    );
+    assert_eq!(**state.mod_data, before);
+}
+
+#[test]
+fn unsupported_group_color_is_reported_without_rewriting_saved_data() {
+    let directory = tempfile::tempdir().unwrap();
+    let dirs = Dirs::from_path(directory.path()).unwrap();
+    let data = r#"{"version":"0.1.0","active_profile":"default","profiles":{"default":{"mods":[]}},"groups":{"future":{"mods":[],"color":"unknown_future_color"}}}"#;
+    let path = dirs.config_dir.join("mod_data.json");
+    fs::create_dir_all(&dirs.config_dir).unwrap();
+    fs::write(&path, data).unwrap();
+    assert!(State::init(dirs).is_err());
+    assert_eq!(fs::read_to_string(path).unwrap(), data);
+}
+
+#[test]
+fn unsupported_mod_data_version_does_not_fall_back_to_legacy_profiles() {
+    let directory = tempfile::tempdir().unwrap();
+    let dirs = Dirs::from_path(directory.path()).unwrap();
+    let data = r#"{"version":"99.0.0","active_profile":"default","profiles":{"default":{"mods":[]}},"groups":{}}"#;
+    let path = dirs.config_dir.join("mod_data.json");
+    fs::create_dir_all(&dirs.config_dir).unwrap();
+    fs::write(&path, data).unwrap();
+    assert!(State::init(dirs).is_err());
+    assert_eq!(fs::read_to_string(path).unwrap(), data);
+}
+
+#[test]
 fn invalid_profile_references_are_rejected_without_rewriting_data() {
     for data in [
         r#"{"version":"0.1.0","active_profile":"default","profiles":{"default":{"mods":[{"group_name":"missing","enabled":true}]}},"groups":{}}"#,
@@ -45,6 +133,7 @@ fn load_order_respects_priorities_groups_and_stable_ties() {
             "group".into(),
             ModGroup {
                 mods: vec![config("high", 10, true), config("tie", 0, true)],
+                ..Default::default()
             },
         )]
         .into(),

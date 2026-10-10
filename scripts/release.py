@@ -23,6 +23,7 @@ NOTICES = (
     "THIRD_PARTY_NOTICES.md",
     "assets/icons/LICENSE",
     "assets/icons/DEPENDENCY_LICENSES.txt",
+    "assets/fonts/OFL.txt",
 )
 
 
