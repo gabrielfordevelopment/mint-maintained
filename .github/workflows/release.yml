@@ -32,6 +32,8 @@ jobs:
       - name: Read and validate release version
         id: metadata
         run: python scripts/release.py metadata >> "$GITHUB_OUTPUT"
+      - name: Validate release notes
+        run: python scripts/release.py notes
       - name: Check existing tag and release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -100,6 +102,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
+          python scripts/release.py notes > release-notes.md
           gh release create "$RELEASE_TAG" artifacts/*.zip --verify-tag --target "$GITHUB_SHA" --draft \
-            --title "MINT Maintained $RELEASE_TAG" --generate-notes
+            --title "MINT Maintained $RELEASE_TAG" --notes-file release-notes.md
           echo "Draft $RELEASE_TAG uploaded. Review the packages and notes, then publish it from Releases." >> "$GITHUB_STEP_SUMMARY"
