@@ -87,7 +87,7 @@ pub struct ModProfile {
     #[obake(cfg("0.0.0"))]
     pub mods: Vec<ModConfig>,
 
-    /// A profile can contain ordered individual mods mixed with mod groups.
+    /// Standalone mods precede groups; older mixed profiles require explicit arrangement.
     #[obake(cfg("0.1.0"))]
     pub mods: Vec<ModOrGroup>,
 }
@@ -97,6 +97,29 @@ pub struct ModProfile {
 pub enum ModOrGroup {
     Group { group_name: String, enabled: bool },
     Individual(ModConfig),
+}
+
+impl ModProfile_v0_1_0 {
+    pub fn group_start(&self) -> usize {
+        self.mods
+            .iter()
+            .position(|entry| matches!(entry, ModOrGroup::Group { .. }))
+            .unwrap_or(self.mods.len())
+    }
+
+    pub fn has_mixed_order(&self) -> bool {
+        self.mods[self.group_start()..]
+            .iter()
+            .any(|entry| matches!(entry, ModOrGroup::Individual(_)))
+    }
+
+    pub fn insertion_index(&self, index: usize, is_group: bool) -> usize {
+        if is_group {
+            index.max(self.group_start())
+        } else {
+            index.min(self.group_start())
+        }
+    }
 }
 
 impl From<ModProfile!["0.0.0"]> for ModProfile!["0.1.0"] {

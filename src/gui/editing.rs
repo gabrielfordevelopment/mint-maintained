@@ -64,7 +64,25 @@ impl App {
         if self.editing_busy() || self.delete_confirmation.is_some() {
             return;
         }
+        if let Some(profile) = edit.ordered_profile()
+            && self
+                .state
+                .mod_data
+                .profiles
+                .get(profile)
+                .is_some_and(|p| p.has_mixed_order())
+        {
+            self.request_edit(Edit::ArrangeProfile(profile.into()), false);
+            return;
+        }
+        let arranging = matches!(edit, Edit::ArrangeProfile(_));
         let description = match &edit {
+            Edit::ArrangeProfile(profile) => Some((
+                "Arrange groups?",
+                format!(
+                    "Move all standalone mods before the groups in profile \"{profile}\"?\nThe relative order within each section and all group contents will be kept. This can change mod load order.\nAfter arranging, you can move entries and edit groups."
+                ),
+            )),
             Edit::DeleteEntry(target) => self.delete_description(target),
             Edit::DeleteProfile(name) => Some((
                 "Delete profile?",
@@ -82,11 +100,15 @@ impl App {
             _ => None,
         };
         let prepared = PreparedEdit::new(&self.state.mod_data, edit);
-        if !skip_confirmation && let Some((title, details)) = description {
+        if (!skip_confirmation || arranging)
+            && let Some((title, details)) = description
+        {
             self.delete_confirmation = Some(DeleteConfirmation {
                 edit: prepared,
                 title,
-                action: if title.starts_with("Remove") {
+                action: if arranging {
+                    "Arrange"
+                } else if title.starts_with("Remove") {
                     "Remove"
                 } else {
                     "Delete"
@@ -272,17 +294,23 @@ impl App {
                     (
                         cancel.clicked(),
                         ui.add_enabled_ui(!busy, |ui| {
-                            super::icons::delete_button(ui, dialog.action, button_size)
+                            if dialog.action == "Arrange" {
+                                ui.add_sized(button_size, egui::Button::new(dialog.action))
+                            } else {
+                                super::icons::delete_button(ui, dialog.action, button_size)
+                            }
                         })
                         .inner
                         .clicked(),
                     )
                 })
                 .inner;
-            ui.add_space(12.0);
-            ui.vertical_centered(|ui| {
-                ui.small("Hold Shift while clicking the trash icon to skip confirmation.");
-            });
+            if dialog.action != "Arrange" {
+                ui.add_space(12.0);
+                ui.vertical_centered(|ui| {
+                    ui.small("Hold Shift while clicking the trash icon to skip confirmation.");
+                });
+            }
             ui.add_space(6.0);
             (cancel, delete)
         });
@@ -301,6 +329,9 @@ fn edit_message(action: &Edit, item: &str, data: &crate::state::ModData_v0_1_0) 
         None => format!("profile {:?}", target.profile),
     };
     match action {
+        Edit::ArrangeProfile(profile) => format!(
+            "Arranged profile {profile:?}: standalone mods first, then groups. Mod load order may have changed."
+        ),
         Edit::DeleteEntry(target) => format!(
             "Removed {item:?} from {}. Mod files were kept.",
             location(target)

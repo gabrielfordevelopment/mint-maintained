@@ -67,7 +67,7 @@ fn dragging_moves_mods_into_and_out_of_groups_without_deleting_files() {
             .is_empty()
     );
     assert!(
-        matches!(&test.app.state.mod_data.get_active_profile().mods[1], ModOrGroup::Individual(mc) if mc == &config)
+        matches!(&test.app.state.mod_data.get_active_profile().mods[0], ModOrGroup::Individual(mc) if mc == &config)
     );
     assert_eq!(std::fs::read(&config.spec.url).unwrap(), b"UI test fixture");
     let loaded = State::init(test.app.state.dirs.clone()).unwrap();
@@ -231,6 +231,142 @@ fn outside_drops_and_no_op_sorted_drops_preserve_manual_order_and_sorting() {
 }
 
 #[test]
+fn root_drops_clamp_to_the_correct_section_and_show_the_actual_boundary() {
+    for dark in [false, true] {
+        let mut test = TestApp::new();
+        test.context.set_visuals(if dark {
+            egui::Visuals::dark()
+        } else {
+            egui::Visuals::light()
+        });
+        let a = test.local_mod("a.pak");
+        let b = test.local_mod("b.pak");
+        test.app.state.mod_data.get_active_profile_mut().mods = vec![
+            ModOrGroup::Individual(a.clone()),
+            ModOrGroup::Individual(b.clone()),
+        ];
+        for name in ["A", "B"] {
+            test.app.request_edit(
+                crate::state::edits::Edit::CreateGroup {
+                    profile: "default".into(),
+                    name: name.into(),
+                },
+                false,
+            );
+        }
+        test.frame(vec![]);
+        let frame = test.frame(vec![]);
+        let boundary = button_rects(&frame, "Drag A")[0].top();
+        let outside_groups = egui::pos2(40.0, 350.0);
+        test.drag_row(
+            button_rects(&frame, &format!("Drag {}", a.spec.url))[0].center(),
+            outside_groups,
+            false,
+        );
+        let frame = test.frame(vec![]);
+        assert!(frame.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::LineSegment { points, stroke } if stroke.width == 2.0 && (points[0].y - boundary).abs() < 3.0
+        )), "insertion marker must stay before the first group");
+        test.frame(vec![egui::Event::PointerButton {
+            pos: outside_groups,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        assert_eq!(
+            test.app.state.mod_data.get_active_profile().mods[0],
+            ModOrGroup::Individual(b)
+        );
+        assert_eq!(
+            test.app.state.mod_data.get_active_profile().mods[1],
+            ModOrGroup::Individual(a)
+        );
+        let frame = test.frame(vec![]);
+        test.drag_row(
+            button_rects(&frame, "Drag B")[0].center(),
+            egui::pos2(40.0, 10.0),
+            true,
+        );
+        assert!(
+            !test
+                .app
+                .state
+                .mod_data
+                .get_active_profile()
+                .has_mixed_order()
+        );
+        assert!(
+            matches!(&test.app.state.mod_data.get_active_profile().mods[2], ModOrGroup::Group { group_name, .. } if group_name == "B")
+        );
+    }
+}
+
+#[test]
+fn mixed_profiles_require_confirmation_and_cancel_or_stale_accept_keeps_data() {
+    use crate::state::edits::Edit;
+    for cancel in [true, false] {
+        let mut test = TestApp::new();
+        let config = test.local_mod("legacy.pak");
+        test.app.state.mod_data.get_active_profile_mut().mods = vec![
+            ModOrGroup::Group {
+                group_name: "default".into(),
+                enabled: false,
+            },
+            ModOrGroup::Individual(config.clone()),
+        ];
+        test.app.state.mod_data.save().unwrap();
+        let original = (**test.app.state.mod_data).clone();
+        test.frame(vec![]);
+        let frame = test.frame(vec![]);
+        test.drag_row(
+            button_rects(&frame, &format!("Drag {}", config.spec.url))[0].center(),
+            egui::pos2(40.0, 350.0),
+            true,
+        );
+        assert_eq!(**test.app.state.mod_data, original);
+        assert!(test.app.delete_confirmation.is_none());
+        let frame = test.frame(vec![]);
+        test.click(button_rects(&frame, "Arrange groups…")[0].center());
+        let frame = test.frame(vec![]);
+        text_rect(&frame, "Arrange groups?");
+        test.click(button_rects(&frame, if cancel { "Cancel" } else { "Arrange" })[0].center());
+        assert_eq!(
+            test.app
+                .state
+                .mod_data
+                .get_active_profile()
+                .has_mixed_order(),
+            cancel
+        );
+        if cancel {
+            assert_eq!(**test.app.state.mod_data, original);
+            // Shift cannot bypass a load-order change, and stale confirmation cannot overwrite edits.
+            test.app
+                .request_edit(Edit::ArrangeProfile("default".into()), true);
+            assert!(test.app.delete_confirmation.is_some());
+            test.app
+                .state
+                .mod_data
+                .get_active_profile_mut()
+                .mods
+                .push(ModOrGroup::Individual(config));
+            let before = (**test.app.state.mod_data).clone();
+            let frame = test.frame(vec![]);
+            test.click(button_rects(&frame, "Arrange")[0].center());
+            assert_eq!(**test.app.state.mod_data, before);
+            assert!(test.app.last_action.is_some());
+        } else {
+            let loaded = State::init(test.app.state.dirs.clone()).unwrap();
+            assert_eq!(**loaded.mod_data, **test.app.state.mod_data);
+            assert!(matches!(
+                &loaded.mod_data.get_active_profile().mods[1],
+                ModOrGroup::Group { enabled: false, .. }
+            ));
+        }
+    }
+}
+
+#[test]
 fn dragging_in_every_sort_mode_saves_visible_order_and_switches_to_manual() {
     for category in SortBy::iter() {
         for reverse in [false, true] {
@@ -328,7 +464,7 @@ fn sorted_group_moves_preserve_visible_members_and_unrelated_groups() {
     );
     assert!(test.app.get_sorting_config().is_none());
     assert!(
-        matches!(test.app.state.mod_data.get_active_profile().mods.last(), Some(ModOrGroup::Individual(config)) if *config == a)
+        matches!(test.app.state.mod_data.get_active_profile().mods.first(), Some(ModOrGroup::Individual(config)) if *config == a)
     );
     test.app.update_sorting_config(Some(SortBy::Name), false);
     let frame = test.frame(vec![]);

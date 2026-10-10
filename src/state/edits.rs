@@ -1,6 +1,8 @@
 use super::{GroupColor, ModConfig, ModData_v0_1_0 as ModData, ModGroup, ModOrGroup, StateError};
 
 #[cfg(test)]
+mod order_tests;
+#[cfg(test)]
 mod tests;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,6 +14,7 @@ pub struct ListTarget {
 
 #[derive(Debug, Clone)]
 pub enum Edit {
+    ArrangeProfile(String),
     DeleteEntry(ListTarget),
     DeleteProfile(String),
     CreateGroup {
@@ -43,6 +46,18 @@ pub enum Edit {
         profile: String,
         index: usize,
     },
+}
+
+impl Edit {
+    pub fn ordered_profile(&self) -> Option<&str> {
+        match self {
+            Self::CreateGroup { profile, .. }
+            | Self::AttachGroup { profile, .. }
+            | Self::Ungroup { profile, .. } => Some(profile),
+            Self::MoveMod { source, .. } | Self::MoveEntry { source, .. } => Some(&source.profile),
+            _ => None,
+        }
+    }
 }
 
 pub struct PreparedEdit {
@@ -175,6 +190,16 @@ impl ModData {
     }
 
     pub fn apply_edit(&mut self, edit: Edit) -> Result<(), StateError> {
+        if let Some(profile) = edit.ordered_profile()
+            && self
+                .profiles
+                .get(profile)
+                .is_some_and(|p| p.has_mixed_order())
+        {
+            return Err(invalid(
+                "Arrange this profile's groups before moving entries or changing groups.",
+            ));
+        }
         let mut next = self.clone();
         next.validate()?;
         next.edit_inner(edit)?;
@@ -243,6 +268,10 @@ impl ModData {
 
     fn edit_inner(&mut self, edit: Edit) -> Result<(), StateError> {
         match edit {
+            Edit::ArrangeProfile(profile) => {
+                self.profile_entries(&profile)?
+                    .sort_by_key(|entry| matches!(entry, ModOrGroup::Group { .. }));
+            }
             Edit::SetGroupColor { name, color } => {
                 self.groups
                     .get_mut(&name)
@@ -277,11 +306,19 @@ impl ModData {
                     if let ModOrGroup::Individual(config) = &mut entry {
                         config.enabled &= group_enabled;
                     }
-                    let entries = self.profile_entries(&destination.profile)?;
+                    let profile = self
+                        .profiles
+                        .get_mut(&destination.profile)
+                        .ok_or_else(|| invalid("The profile no longer exists."))?;
+                    let index = profile.insertion_index(
+                        destination.index,
+                        matches!(entry, ModOrGroup::Group { .. }),
+                    );
+                    let entries = &mut profile.mods;
                     if destination.index > entries.len() {
                         return Err(invalid("The destination changed."));
                     }
-                    entries.insert(destination.index, entry);
+                    entries.insert(index, entry);
                 }
             }
             Edit::DeleteEntry(target) => {
@@ -348,9 +385,10 @@ impl ModData {
                         .mods
                         .len()
                 } else {
-                    self.profiles.get(&source.profile).ok_or_else(|| invalid("The profile no longer exists."))?.mods.iter()
-                        .position(|entry| matches!(entry, ModOrGroup::Group { group_name, .. } if Some(group_name) == source.group.as_ref()))
-                        .ok_or_else(|| invalid("The source group is missing."))? + 1
+                    self.profiles
+                        .get(&source.profile)
+                        .ok_or_else(|| invalid("The profile no longer exists."))?
+                        .group_start()
                 };
                 let destination = ListTarget {
                     profile: source.profile.clone(),
@@ -384,7 +422,10 @@ impl ModData {
                         mc
                     })
                     .collect();
-                self.profile_entries(&profile)?
+                let profile = self.profiles.get_mut(&profile).unwrap();
+                let index = profile.group_start();
+                profile
+                    .mods
                     .splice(index..index, mods.into_iter().map(ModOrGroup::Individual));
             }
         }

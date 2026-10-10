@@ -2,7 +2,7 @@ use super::*;
 use crate::state::{ModProfile_v0_1_0 as ModProfile, State};
 use crate::{Dirs, providers::ModSpecification};
 
-fn config(name: &str) -> ModConfig {
+pub(super) fn config(name: &str) -> ModConfig {
     ModConfig {
         spec: ModSpecification::new(name.into()),
         enabled: true,
@@ -11,7 +11,7 @@ fn config(name: &str) -> ModConfig {
     }
 }
 
-fn fixture() -> ModData {
+pub(super) fn fixture() -> ModData {
     let mut data = ModData::default();
     data.profiles.insert("other".into(), ModProfile::default());
     data.profiles.get_mut("default").unwrap().mods = vec![
@@ -21,7 +21,7 @@ fn fixture() -> ModData {
     data
 }
 
-fn target(group: Option<&str>, index: usize) -> ListTarget {
+pub(super) fn target(group: Option<&str>, index: usize) -> ListTarget {
     ListTarget {
         profile: "default".into(),
         group: group.map(str::to_owned),
@@ -119,7 +119,7 @@ fn indexed_moves_reorder_shared_members_and_reject_invalid_destinations_atomical
     })
     .unwrap();
     assert!(
-        matches!(&data.profiles["default"].mods[1], ModOrGroup::Individual(mc) if !mc.enabled && mc.spec.url == "first")
+        matches!(&data.profiles["default"].mods[0], ModOrGroup::Individual(mc) if !mc.enabled && mc.spec.url == "first")
     );
     assert_eq!(data.groups["Shared"].mods, [config("second")]);
     assert_eq!(data.group_users("Shared"), ["default", "other"]);
@@ -195,6 +195,13 @@ fn ungroup_preserves_order_and_effective_enabled_state_without_changing_shared_d
         profile: "default".into(),
         index: 1,
     })
+    .unwrap_err();
+    data.apply_edit(Edit::ArrangeProfile("default".into()))
+        .unwrap();
+    data.apply_edit(Edit::Ungroup {
+        profile: "default".into(),
+        index: 2,
+    })
     .unwrap();
     let mods: Vec<_> = data.profiles["default"]
         .mods
@@ -208,9 +215,9 @@ fn ungroup_preserves_order_and_effective_enabled_state_without_changing_shared_d
         mods,
         [
             ("first", true, 25),
+            ("second", true, 25),
             ("a", false, 25),
             ("b", false, 25),
-            ("second", true, 25)
         ]
     );
     assert_eq!(data.groups["Shared"].mods, [config("a"), config("b")]);
@@ -246,7 +253,7 @@ fn moves_and_global_deletion_preserve_valid_references_and_other_entries() {
     .unwrap();
     assert!(data.groups["B"].mods.is_empty());
     assert!(
-        matches!(data.profiles["default"].mods.last(), Some(ModOrGroup::Individual(mc)) if mc.spec.url == "first")
+        matches!(&data.profiles["default"].mods[1], ModOrGroup::Individual(mc) if mc.spec.url == "first")
     );
     data.apply_edit(Edit::AttachGroup {
         profile: "other".into(),

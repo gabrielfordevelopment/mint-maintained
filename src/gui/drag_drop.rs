@@ -80,7 +80,7 @@ pub(super) fn handle(
         response.on_hover_text(if enabled {
             "Drag to reorder or move between groups; a successful move switches to Manual"
         } else {
-            "Dragging is unavailable while an operation is running"
+            "Arrange mixed profiles before dragging; wait for any running operation to finish"
         });
     }
 }
@@ -174,8 +174,21 @@ pub(super) fn finish(
             false,
         ));
     }
-    let destination = target?;
-    let (rect, after) = highlight?;
+    let mut destination = target?;
+    let (mut rect, mut after) = highlight?;
+    if destination.group.is_none() {
+        let profile = payload.snapshot.before.profiles.get(profile)?;
+        let index = profile.insertion_index(destination.index, payload.is_group);
+        if index != destination.index {
+            destination.index = index;
+            let first_group = rows.iter().find(|row| {
+                row.parent_index.is_none() && row.target.index == profile.group_start()
+            })?;
+            rect = first_group.rect;
+            rect.min.x = ui.max_rect().left();
+            after = false;
+        }
+    }
     let color = ui.visuals().selection.stroke.color;
     if into_group {
         ui.painter()
@@ -195,7 +208,8 @@ pub(super) fn finish(
     }
     let hint = match &destination.group {
         Some(name) => format!("{} → {name} (shared group)", payload.label),
-        None => format!("{} → profile", payload.label),
+        None if payload.is_group => format!("{} → groups", payload.label),
+        None => format!("{} → standalone mods", payload.label),
     };
     egui::Area::new(egui::Id::new("drag-hint"))
         .order(egui::Order::Tooltip)

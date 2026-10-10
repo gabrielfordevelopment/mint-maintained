@@ -9,7 +9,24 @@ impl App {
             ui.disable();
         }
         let sorting_config = self.get_sorting_config();
-        let can_drag = ui.is_enabled();
+        let mixed_order = self
+            .state
+            .mod_data
+            .profiles
+            .get(profile)
+            .is_some_and(|p| p.has_mixed_order());
+        if mixed_order {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Arrange this profile to keep standalone mods before groups.");
+                if ui.button("Arrange groups…").clicked() {
+                    self.request_edit(
+                        crate::state::edits::Edit::ArrangeProfile(profile.into()),
+                        false,
+                    );
+                }
+            });
+        }
+        let can_drag = ui.is_enabled() && !mixed_order;
         let display_order = self.visible_order(profile, sorting_config.as_ref());
         let sorting_key = sorting_config
             .as_ref()

@@ -95,11 +95,11 @@ fn edit_logs_distinguish_saved_cancelled_rejected_and_unsaved_changes() {
         .mod_data
         .get_active_profile_mut()
         .mods
-        .push(ModOrGroup::Individual(config));
+        .insert(0, ModOrGroup::Individual(config));
     let target = ListTarget {
         profile: "default".into(),
         group: None,
-        index: 1,
+        index: 0,
     };
     test.app
         .request_edit(Edit::DeleteEntry(target.clone()), false);
@@ -115,7 +115,13 @@ fn edit_logs_distinguish_saved_cancelled_rejected_and_unsaved_changes() {
         },
         false,
     );
-    test.app.request_edit(Edit::DeleteEntry(target), true);
+    test.app.request_edit(
+        Edit::DeleteEntry(ListTarget {
+            index: 99,
+            ..target
+        }),
+        true,
+    );
     let blocked = test.directory.path().join("blocked-save");
     std::fs::create_dir(&blocked).unwrap();
     test.app.state.mod_data = crate::state::config::ConfigWrapper::new(
