@@ -2,6 +2,7 @@ mod diagnostics;
 mod drag_drop;
 mod editing;
 mod find_string;
+mod group_colors;
 mod group_view;
 mod groups;
 mod icons;

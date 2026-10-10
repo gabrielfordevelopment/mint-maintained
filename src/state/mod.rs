@@ -48,6 +48,35 @@ fn is_zero(value: &i32) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ModGroup {
     pub mods: Vec<ModConfig>,
+    #[serde(default, skip_serializing_if = "GroupColor::is_default")]
+    pub color: GroupColor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, strum::EnumIter)]
+#[serde(rename_all = "snake_case")]
+pub enum GroupColor {
+    #[default]
+    Gray,
+    Rose,
+    Red,
+    Orange,
+    Amber,
+    Lime,
+    Green,
+    Teal,
+    Cyan,
+    Sky,
+    Blue,
+    Indigo,
+    Violet,
+    Purple,
+    Pink,
+}
+
+impl GroupColor {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 #[obake::versioned]
@@ -304,11 +333,24 @@ pub enum VersionAnnotatedModData {
     V0_1_0(ModData!["0.1.0"]),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub enum MaybeVersionedModData {
     Versioned(VersionAnnotatedModData),
     Legacy(ModData!["0.0.0"]),
+}
+
+impl<'de> Deserialize<'de> for MaybeVersionedModData {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        // A failed versioned read must not fall back to legacy data and discard groups.
+        if value.get("version").is_some() {
+            serde_json::from_value(value).map(Self::Versioned)
+        } else {
+            serde_json::from_value(value).map(Self::Legacy)
+        }
+        .map_err(serde::de::Error::custom)
+    }
 }
 
 impl Default for ModData!["0.0.0"] {
@@ -626,6 +668,7 @@ mod mod_data_tests {
                 "mg1".to_string(),
                 ModGroup {
                     mods: vec![mod_2, mod_3],
+                    ..Default::default()
                 },
             )]
             .into(),
@@ -680,6 +723,7 @@ mod mod_data_tests {
                 "mg1".to_string(),
                 ModGroup {
                     mods: vec![mod_2, mod_3],
+                    ..Default::default()
                 },
             )]
             .into(),
@@ -734,6 +778,7 @@ mod mod_data_tests {
                 "mg1".to_string(),
                 ModGroup {
                     mods: vec![mod_2, mod_3],
+                    ..Default::default()
                 },
             )]
             .into(),

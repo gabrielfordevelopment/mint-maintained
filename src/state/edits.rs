@@ -1,4 +1,4 @@
-use super::{ModConfig, ModData_v0_1_0 as ModData, ModGroup, ModOrGroup, StateError};
+use super::{GroupColor, ModConfig, ModData_v0_1_0 as ModData, ModGroup, ModOrGroup, StateError};
 
 #[cfg(test)]
 mod tests;
@@ -27,6 +27,10 @@ pub enum Edit {
         replacement: String,
     },
     DeleteGroup(String),
+    SetGroupColor {
+        name: String,
+        color: GroupColor,
+    },
     MoveMod {
         source: ListTarget,
         destination: Option<String>,
@@ -150,6 +154,12 @@ impl ModData {
 
     fn edit_inner(&mut self, edit: Edit) -> Result<(), StateError> {
         match edit {
+            Edit::SetGroupColor { name, color } => {
+                self.groups
+                    .get_mut(&name)
+                    .ok_or_else(|| invalid("The group no longer exists."))?
+                    .color = color;
+            }
             Edit::MoveEntry {
                 source,
                 mut destination,

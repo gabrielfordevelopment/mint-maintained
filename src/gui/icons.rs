@@ -74,6 +74,45 @@ impl Icon {
 }
 
 pub fn button(ui: &mut Ui, icon: Icon, label: &str) -> Response {
+    ui.scope(|ui| {
+        style_action(ui, icon);
+        icon_button(ui, icon, label)
+    })
+    .inner
+}
+
+fn style_action(ui: &mut Ui, icon: Icon) {
+    let colors = match icon {
+        Icon::Add => [(37, 99, 235), (29, 78, 216), (30, 64, 175)],
+        Icon::Delete if ui.visuals().dark_mode => [(158, 36, 43), (140, 29, 36), (122, 24, 31)],
+        Icon::Delete => [(190, 42, 49), (166, 30, 38), (140, 24, 31)],
+        _ => return,
+    };
+    let widgets = &mut ui.visuals_mut().widgets;
+    for (visuals, (r, g, b)) in [
+        &mut widgets.inactive,
+        &mut widgets.hovered,
+        &mut widgets.active,
+    ]
+    .into_iter()
+    .zip(colors)
+    {
+        visuals.weak_bg_fill = Color32::from_rgb(r, g, b);
+        visuals.bg_fill = visuals.weak_bg_fill;
+        visuals.fg_stroke.color = Color32::WHITE;
+        visuals.bg_stroke = egui::Stroke::NONE;
+    }
+}
+
+pub fn delete_button(ui: &mut Ui, label: &str, size: Vec2) -> Response {
+    ui.scope(|ui| {
+        style_action(ui, Icon::Delete);
+        ui.add_sized(size, egui::Button::new(label))
+    })
+    .inner
+}
+
+fn icon_button(ui: &mut Ui, icon: Icon, label: &str) -> Response {
     let width = match icon {
         Icon::Add | Icon::Delete => 24.0,
         _ => 20.0,
@@ -86,58 +125,12 @@ pub fn button(ui: &mut Ui, icon: Icon, label: &str) -> Response {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
     });
     let visuals = ui.style().interact(&response);
-    let dark = ui.visuals().dark_mode;
-    let (foreground, hover, active) = match icon {
-        Icon::Add => {
-            if dark {
-                (
-                    visuals.text_color(),
-                    Color32::DARK_GREEN,
-                    Color32::from_rgb(0, 80, 0),
-                )
-            } else {
-                (
-                    visuals.text_color(),
-                    Color32::from_rgb(201, 230, 210),
-                    Color32::from_rgb(178, 213, 191),
-                )
-            }
-        }
-        Icon::Delete => {
-            if dark {
-                (
-                    visuals.text_color(),
-                    Color32::DARK_RED,
-                    Color32::from_rgb(110, 0, 0),
-                )
-            } else {
-                (
-                    visuals.text_color(),
-                    Color32::from_rgb(246, 208, 211),
-                    Color32::from_rgb(235, 181, 186),
-                )
-            }
-        }
-        Icon::Warning | Icon::Error => (
-            ui.visuals().warn_fg_color,
-            visuals.weak_bg_fill,
-            visuals.weak_bg_fill,
-        ),
-        _ => (
-            visuals.text_color(),
-            visuals.weak_bg_fill,
-            visuals.weak_bg_fill,
-        ),
-    };
-    let background = if response.is_pointer_button_down_on() {
-        active
-    } else if response.hovered() {
-        hover
-    } else {
-        visuals.weak_bg_fill
+    let foreground = match icon {
+        Icon::Warning | Icon::Error => ui.visuals().warn_fg_color,
+        _ => visuals.text_color(),
     };
     ui.painter()
-        .rect_filled(response.rect, CORNER_RADIUS, background);
+        .rect_filled(response.rect, CORNER_RADIUS, visuals.weak_bg_fill);
     let color = if ui.is_enabled() {
         foreground
     } else {

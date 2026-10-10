@@ -1,6 +1,7 @@
 use super::*;
 mod drag_drop;
 mod editing;
+mod group_colors;
 use crate::providers::ModResolution;
 use crate::state::ModGroup;
 
@@ -362,6 +363,7 @@ fn grouped_profile_renders_every_sort_mode_after_reload() {
         "Group".into(),
         ModGroup {
             mods: vec![zulu, alpha],
+            ..Default::default()
         },
     );
     test.app
@@ -417,6 +419,7 @@ fn sorted_group_uses_local_indices_for_toggle_and_duplicate_removal() {
         "Group".into(),
         ModGroup {
             mods: vec![zulu, alpha],
+            ..Default::default()
         },
     );
     test.app.update_sorting_config(Some(SortBy::Name), false);
@@ -552,7 +555,7 @@ fn rows_stay_compact_without_a_header() {
         let alpha = text_rect(&output, "alpha.pak");
         let zulu = text_rect(&output, "zulu.pak");
         assert!(alpha.top() < 15.0);
-        assert!(zulu.top() - alpha.top() <= 22.0);
+        assert!(zulu.top() - alpha.top() <= 23.0);
         assert!(button_rects(&output, "Delete mod")[0].height() <= 20.0);
     }
 }

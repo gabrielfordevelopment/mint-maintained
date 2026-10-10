@@ -1,6 +1,8 @@
 use super::*;
 use crate::state::edits::{Edit, ListTarget};
 
+const ROW_PADDING: egui::Margin = egui::Margin::symmetric(0, 1);
+
 impl App {
     pub(super) fn ui_profile(&mut self, ui: &mut Ui, profile: &str) {
         if self.editing_busy() || self.delete_confirmation.is_some() {
@@ -13,6 +15,18 @@ impl App {
         .then(|| (**self.state.mod_data).clone());
         let profile_name = profile.to_owned();
         let group_names: Vec<_> = self.state.mod_data.groups.keys().cloned().collect();
+        let group_fills: HashMap<_, _> = self
+            .state
+            .mod_data
+            .groups
+            .iter()
+            .map(|(name, group)| {
+                (
+                    name.clone(),
+                    group_colors::palette(group.color, ui.visuals().dark_mode).1,
+                )
+            })
+            .collect();
         let group_views = &mut self.group_views;
 
         let ModData {
@@ -528,6 +542,8 @@ impl App {
                                         );
                                 })
                                 .show(ui, |ui| {
+                                    let body_background = ui.painter().add(egui::Shape::Noop);
+                                    let body_top = ui.cursor().top();
                                     let group = groups.get_mut(group_name).unwrap();
                                     let keys = row_keys(
                                         group.mods.iter().map(|mc| (false, mc.spec.url.clone())),
@@ -537,33 +553,51 @@ impl App {
                                         sorting_config.as_ref(),
                                         |spec| self.state.store.get_mod_info(spec),
                                     );
-                                    for index in order {
+                                    for (visual_index, index) in order.into_iter().enumerate() {
                                         ui.push_id(
                                             ("group", group_name.as_str(), &keys[index]),
                                             |ui| {
-                                                let row = ui.horizontal(|ui| {
-                                                    drag_drop::handle(
-                                                        ui,
-                                                        ListTarget {
-                                                            profile: profile_name.clone(),
-                                                            group: Some(group_name.clone()),
-                                                            index,
-                                                        },
-                                                        snapshot.as_ref(),
-                                                        false,
-                                                        &group.mods[index].spec.url,
-                                                        can_drag,
-                                                    );
-                                                    ui_mod(
-                                                        ctx,
-                                                        ui,
-                                                        Some(group_name),
-                                                        index,
-                                                        &mut group.mods[index],
-                                                    );
-                                                });
+                                                let stripe = ui.painter().add(egui::Shape::Noop);
+                                                let row = egui::Frame::NONE
+                                                    .inner_margin(ROW_PADDING)
+                                                    .show(ui, |ui| {
+                                                        ui.horizontal(|ui| {
+                                                            drag_drop::handle(
+                                                                ui,
+                                                                ListTarget {
+                                                                    profile: profile_name.clone(),
+                                                                    group: Some(group_name.clone()),
+                                                                    index,
+                                                                },
+                                                                snapshot.as_ref(),
+                                                                false,
+                                                                &group.mods[index].spec.url,
+                                                                can_drag,
+                                                            );
+                                                            ui_mod(
+                                                                ctx,
+                                                                ui,
+                                                                Some(group_name),
+                                                                index,
+                                                                &mut group.mods[index],
+                                                            );
+                                                        })
+                                                    });
                                                 let mut rect = row.response.rect;
                                                 rect.max.x = ui.max_rect().right();
+                                                if visual_index % 2 == 1 {
+                                                    ui.painter().set(
+                                                        stripe,
+                                                        egui::Shape::rect_filled(
+                                                            rect.expand2(egui::vec2(
+                                                                0.0,
+                                                                ui.spacing().item_spacing.y / 2.0,
+                                                            )),
+                                                            0,
+                                                            ui.visuals().faint_bg_color,
+                                                        ),
+                                                    );
+                                                }
                                                 ctx.rows.push(drag_drop::DropRow {
                                                     rect,
                                                     target: ListTarget {
@@ -577,17 +611,74 @@ impl App {
                                             },
                                         );
                                     }
+                                    let body_rect = egui::Rect::from_min_max(
+                                        egui::pos2(ui.max_rect().left(), body_top),
+                                        egui::pos2(ui.max_rect().right(), ui.min_rect().bottom()),
+                                    );
+                                    ui.painter().set(
+                                        body_background,
+                                        egui::Shape::rect_filled(
+                                            body_rect,
+                                            0,
+                                            ui.visuals().panel_fill,
+                                        ),
+                                    );
                                 });
-                            if header.header_response.clicked() {
+                            let header_rect = header.header_response.rect;
+                            let tail = egui::Rect::from_min_max(
+                                header_rect.right_top(),
+                                egui::pos2(
+                                    ui.max_rect().right().max(header_rect.right()),
+                                    header_rect.bottom(),
+                                ),
+                            );
+                            let count = groups[group_name].mods.len();
+                            let count_label =
+                                format!("({count} {})", if count == 1 { "mod" } else { "mods" });
+                            ui.painter()
+                                .with_clip_rect(tail.intersect(ui.clip_rect()))
+                                .text(
+                                    tail.left_center() + egui::vec2(4.0, 0.0),
+                                    egui::Align2::LEFT_CENTER,
+                                    &count_label,
+                                    egui::TextStyle::Button.resolve(ui.style()),
+                                    ui.visuals().text_color(),
+                                );
+                            let tail_response = ui.interact(
+                                tail,
+                                header.header_response.id.with("tail"),
+                                egui::Sense::click(),
+                            );
+                            let header_response = header
+                                .header_response
+                                .union(tail_response)
+                                .on_hover_cursor(egui::CursorIcon::PointingHand);
+                            header_response.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::WidgetType::CollapsingHeader,
+                                    ui.is_enabled(),
+                                    format!("{group_name} {count_label}"),
+                                )
+                            });
+                            if header_response.clicked() {
                                 group_views.get(&profile_name, group_name).toggle();
                                 ui.ctx().request_repaint();
                             }
                             ctx.header = Some((
-                                header.header_response.rect,
+                                header_response.rect,
                                 group_name.clone(),
                                 groups[group_name].mods.len(),
                             ));
-                            header.header_response.context_menu(|ui| {
+                            header_response.context_menu(|ui| {
+                                if let Some(color) =
+                                    group_colors::picker(ui, groups[group_name].color)
+                                {
+                                    ctx.edit = Some(Edit::SetGroupColor {
+                                        name: group_name.clone(),
+                                        color,
+                                    });
+                                }
+                                ui.separator();
                                 ui.label("Shared group: changes apply to all profiles using it.");
                                 if ui.button("Rename group…").clicked() {
                                     ctx.open_group = Some(group_name.clone());
@@ -622,15 +713,12 @@ impl App {
                     ModOrGroup::Group { group_name, .. } => Some(group_name.clone()),
                     _ => None,
                 };
-                let mut frame = egui::Frame::NONE;
+                let mut frame = egui::Frame::NONE.inner_margin(ROW_PADDING);
                 if visual_index % 2 == 1 {
                     frame.fill = ui.visuals().faint_bg_color;
                 }
-                if group_name.is_some() {
-                    frame.fill = ui
-                        .visuals()
-                        .panel_fill
-                        .gamma_multiply(if ui.visuals().dark_mode { 1.2 } else { 0.97 });
+                if let Some(name) = &group_name {
+                    frame.fill = group_fills[name];
                     frame.corner_radius = 3.into();
                 }
                 ctx.header = None;

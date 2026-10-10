@@ -135,9 +135,12 @@ fn edit_logs_distinguish_saved_cancelled_rejected_and_unsaved_changes() {
     file.rewind().unwrap();
     let mut log = String::new();
     file.read_to_string(&mut log).unwrap();
-    assert_eq!(log.matches("Profile edit saved").count(), 2, "{log}");
-    assert!(log.contains("logged.pak"));
-    assert!(log.contains("MoveEntry"));
+    assert_eq!(log.matches(" INFO ").count(), 2, "{log}");
+    assert!(log.contains("Created group \"Logged group\" in profile \"default\"."));
+    assert!(log.contains(
+        "Moved \"logged.pak\" from profile \"default\" to shared group \"Logged group\"."
+    ));
+    assert!(!log.contains("MoveEntry"));
     assert!(log.contains("Profile edit rejected; nothing changed"));
     assert!(log.contains("Profile edit applied in memory but could not be saved"));
     assert!(test.app.state.mod_data.groups.contains_key("Unsaved group"));

@@ -31,6 +31,10 @@ The source types and version declarations are authoritative; do not duplicate sc
 
 ## Migration procedure and evidence
 
+Mod-data deserialization dispatches by the presence of the `version` field. Invalid or unsupported versioned content is never retried as legacy data, which could otherwise discard the shared group map. Unversioned legacy profiles still follow the existing migration path.
+
+`ModGroup.color` is an optional additive field in the existing mod-data format. Stable snake-case `GroupColor` names identify 15 palette choices; missing color defaults to gray and gray is omitted when saving. It belongs to the shared group definition, survives rename and reload, and never changes membership or enabled state. Unknown color values fail deserialization without rewriting the source file. No schema-version bump is needed for this compatible addition. Older binaries can read the extra field but may discard the color when saving; mod contents and profile references remain compatible.
+
 Identify the affected reader, writer, external shape, defaults, consumers, and oldest supported representation. Complete and validate conversion before replacing the current file; retain the source until the replacement succeeds. Do not use an empty default as recovery from an unknown schema or failed write.
 
 Use temporary directories and deterministic local fixtures. Cover missing, legacy, current, malformed, future-version, failed-write, and retry paths as applicable. Check both the returned result and the original bytes. Reopen the saved state to verify that retained legacy files do not override newer edits.

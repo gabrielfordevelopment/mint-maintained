@@ -5,26 +5,18 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 const MAX_LOG_BYTES: u64 = 128 * 1024;
 
-fn with_local_times(text: &str) -> String {
-    annotate_times(text, |timestamp| {
-        timestamp.with_timezone(&chrono::Local).fixed_offset()
-    })
-}
-
-fn annotate_times(
-    text: &str,
-    local: impl Fn(chrono::DateTime<chrono::FixedOffset>) -> chrono::DateTime<chrono::FixedOffset>,
-) -> String {
+fn format_utc_times(text: &str) -> String {
     let mut output = String::with_capacity(text.len());
     for line in text.split_inclusive('\n') {
         let timestamp = line
             .split_once(' ')
             .map_or(line.trim_end(), |(timestamp, _)| timestamp);
         if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(timestamp) {
-            output.push_str(timestamp);
             output.push_str(&format!(
-                " [{} local]",
-                local(parsed).format("%Y-%m-%d %H:%M:%S %:z")
+                "[{}]",
+                parsed
+                    .with_timezone(&chrono::Utc)
+                    .format("%Y-%m-%d %H:%M:%S")
             ));
             output.push_str(&line[timestamp.len()..]);
         } else {
@@ -32,6 +24,56 @@ fn annotate_times(
         }
     }
     output
+}
+
+#[derive(Clone, Copy)]
+enum LogLevel {
+    Info,
+    Warn,
+    Error,
+    Debug,
+}
+
+fn visible_log(
+    text: &str,
+    show_debug: bool,
+    visuals: &egui::Visuals,
+    font: egui::FontId,
+) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::default();
+    let mut level = LogLevel::Info;
+    for line in text.split_inclusive('\n') {
+        if let Some((timestamp, message)) = line.strip_prefix('[').and_then(|s| s.split_once("] "))
+            && chrono::NaiveDateTime::parse_from_str(timestamp, "%Y-%m-%d %H:%M:%S").is_ok()
+        {
+            level = match message.split_whitespace().next() {
+                Some("DEBUG" | "TRACE") => LogLevel::Debug,
+                Some("WARN") => LogLevel::Warn,
+                Some("ERROR") => LogLevel::Error,
+                _ => LogLevel::Info,
+            };
+        }
+        if !show_debug && matches!(level, LogLevel::Debug) {
+            continue;
+        }
+        let color = match (level, visuals.dark_mode) {
+            (LogLevel::Warn, true) => egui::Color32::from_rgb(235, 190, 110),
+            (LogLevel::Warn, false) => egui::Color32::from_rgb(145, 87, 10),
+            (LogLevel::Error, true) => egui::Color32::from_rgb(245, 145, 145),
+            (LogLevel::Error, false) => egui::Color32::from_rgb(175, 40, 48),
+            _ => visuals.text_color(),
+        };
+        job.append(
+            line,
+            0.0,
+            egui::TextFormat {
+                font_id: font.clone(),
+                color,
+                ..Default::default()
+            },
+        );
+    }
+    job
 }
 
 pub(super) struct LogWindow {
@@ -42,6 +84,9 @@ pub(super) struct LogWindow {
     paused: bool,
     follow: bool,
     on_top: bool,
+    show_debug: bool,
+    rendered: egui::text::LayoutJob,
+    rendered_dark: Option<bool>,
 }
 
 impl Drop for LogWindow {
@@ -74,7 +119,7 @@ impl LogWindow {
                 let update = read_tail(&path)
                     .await
                     .map(|text| {
-                        with_local_times(&super::diagnostics::redact(
+                        format_utc_times(&super::diagnostics::redact(
                             &text,
                             secrets.iter().cloned(),
                         ))
@@ -96,6 +141,9 @@ impl LogWindow {
             paused: false,
             follow: true,
             on_top: false,
+            show_debug: false,
+            rendered: Default::default(),
+            rendered_dark: None,
         }
     }
 
@@ -123,16 +171,22 @@ impl LogWindow {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui) {
+        let mut refresh = self.rendered_dark != Some(ui.visuals().dark_mode);
         if !self.paused && self.updates.has_changed().unwrap_or(false) {
             match self.updates.borrow_and_update().clone() {
                 Ok(text) => {
                     self.text = text;
+                    refresh = true;
                     self.error = None;
                 }
                 Err(error) => self.error = Some(error),
             }
         }
-        ui.horizontal(|ui| {
+        let mut copy = false;
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Time: UTC");
+            ui.separator();
+            refresh |= ui.checkbox(&mut self.show_debug, "Show debug").changed();
             ui.checkbox(&mut self.follow, "Follow log");
             ui.checkbox(&mut self.paused, "Pause");
             if ui.checkbox(&mut self.on_top, "Always on top").changed() {
@@ -143,35 +197,39 @@ impl LogWindow {
                         egui::WindowLevel::Normal
                     }));
             }
-            if ui.button("Copy log").clicked() {
-                ui.ctx().copy_text(self.text.clone());
-            }
+            copy = ui.button("Copy visible log").clicked();
         });
+        if refresh {
+            self.rendered = visible_log(
+                &self.text,
+                self.show_debug,
+                ui.visuals(),
+                egui::TextStyle::Monospace.resolve(ui.style()),
+            );
+            self.rendered_dark = Some(ui.visuals().dark_mode);
+        }
+        if copy {
+            ui.ctx().copy_text(self.rendered.text.clone());
+        }
         ui.separator();
         if let Some(error) = &self.error {
             ui.colored_label(ui.visuals().error_fg_color, error);
         }
         if self.text.is_empty() {
             ui.label("Waiting for log entries…");
+        } else if self.rendered.text.is_empty() {
+            ui.label("No INFO, WARN or ERROR entries. Enable Show debug for more detail.");
         }
-        let lines: Vec<_> = self.text.lines().collect();
-        egui::ScrollArea::both()
+        egui::ScrollArea::vertical()
             .stick_to_bottom(self.follow)
             .auto_shrink([false, false])
-            .show_rows(
-                ui,
-                ui.text_style_height(&egui::TextStyle::Monospace),
-                lines.len(),
-                |ui, range| {
-                    for line in &lines[range] {
-                        ui.add(
-                            egui::Label::new(egui::RichText::new(*line).monospace())
-                                .selectable(true)
-                                .extend(),
-                        );
-                    }
-                },
-            );
+            .show(ui, |ui| {
+                ui.add(
+                    egui::Label::new(self.rendered.clone())
+                        .selectable(true)
+                        .wrap(),
+                );
+            });
     }
 }
 
@@ -180,23 +238,77 @@ mod tests {
     use super::*;
 
     #[test]
-    fn local_timestamps_preserve_original_entries_and_handle_date_rollover() {
+    fn filtering_preserves_severity_continuations_and_unstructured_messages() {
+        let text = "unstructured ő message\n[2026-10-10 12:00:00] DEBUG hidden\n  hidden continuation\n[2026-10-10 12:00:01] INFO visible DEBUG word\n  visible continuation\n[2026-10-10 12:00:02] WARN warning\n[2026-10-10 12:00:03] ERROR failure\n  failure details\n[2026-10-10 12:00:04] TRACE hidden trace\n";
+        for visuals in [egui::Visuals::light(), egui::Visuals::dark()] {
+            let font = egui::FontId::monospace(12.0);
+            let normal = visible_log(text, false, &visuals, font.clone());
+            assert!(!normal.text.contains("hidden"));
+            assert!(normal.text.contains("unstructured ő message"));
+            assert!(
+                normal
+                    .text
+                    .contains("visible DEBUG word\n  visible continuation")
+            );
+            assert!(normal.text.contains("failure\n  failure details"));
+            let warning = normal
+                .sections
+                .iter()
+                .find(|s| normal.text[s.byte_range.clone()].contains("WARN"))
+                .unwrap();
+            let error = normal
+                .sections
+                .iter()
+                .find(|s| normal.text[s.byte_range.clone()].contains("ERROR"))
+                .unwrap();
+            assert_ne!(warning.format.color, error.format.color);
+            assert_ne!(error.format.color, visuals.text_color());
+            assert_eq!(visible_log(text, true, &visuals, font).text, text);
+        }
+    }
+
+    #[test]
+    fn long_log_messages_wrap_within_the_viewport() {
+        let context = egui::Context::default();
+        let _ = context.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(320.0, 300.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let text = format!(
+                        "[2026-10-10 12:00:00] WARN {}",
+                        "A long Unicode ő message. ".repeat(20)
+                    );
+                    let job =
+                        visible_log(&text, false, ui.visuals(), egui::FontId::monospace(12.0));
+                    let available = ui.available_width();
+                    let response = ui.add(egui::Label::new(job).wrap().selectable(true));
+                    assert!(response.rect.width() <= available);
+                    assert!(response.rect.height() > 24.0);
+                });
+            },
+        );
+    }
+
+    #[test]
+    fn utc_timestamps_are_compact_and_preserve_messages_and_continuations() {
         let text =
             "2026-10-10T23:42:08.123456Z INFO moved mod\n  continuation\ninvalid timestamp\n";
-        let annotated = annotate_times(text, |dt| {
-            dt.with_timezone(&chrono::FixedOffset::east_opt(7200).unwrap())
-        });
         assert_eq!(
-            annotated,
-            "2026-10-10T23:42:08.123456Z [2026-10-11 01:42:08 +02:00 local] INFO moved mod\n  continuation\ninvalid timestamp\n"
+            format_utc_times(text),
+            "[2026-10-10 23:42:08] INFO moved mod\n  continuation\ninvalid timestamp\n"
         );
-        let winter = annotate_times("2026-12-10T07:42:08Z INFO winter", |dt| {
-            dt.with_timezone(&chrono::FixedOffset::east_opt(3600).unwrap())
-        });
-        assert!(winter.contains("[2026-12-10 08:42:08 +01:00 local]"));
-        assert!(!winter.ends_with('\n'));
         assert_eq!(
-            with_local_times("plain Unicode ő log\n"),
+            format_utc_times("2026-10-11T01:42:08+02:00 INFO entry"),
+            "[2026-10-10 23:42:08] INFO entry"
+        );
+        assert_eq!(
+            format_utc_times("plain Unicode ő log\n"),
             "plain Unicode ő log\n"
         );
     }

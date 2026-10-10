@@ -144,6 +144,7 @@ fn ungroup_preserves_order_and_effective_enabled_state_without_changing_shared_d
         "Shared".into(),
         ModGroup {
             mods: vec![config("a"), config("b")],
+            ..Default::default()
         },
     );
     data.profiles.get_mut("default").unwrap().mods.insert(

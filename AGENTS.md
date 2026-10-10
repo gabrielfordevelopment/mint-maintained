@@ -45,7 +45,7 @@
 
 - Preserve the compact layout, row heights, control order, and placement unless a layout change is requested. Do not add a table header or enlarge controls as incidental polish.
 - Reuse the SVG controls in `src/gui/icons.rs`; keep vector sources in `assets/icons/`. Avoid Unicode stand-ins for existing icons and unnecessary texture regeneration each frame.
-- Add/delete icons use the normal theme foreground; green/red feedback belongs to hover and pressed states. Theme selection uses the standard egui selection highlight. Preserve button padding, footer alignment, keyboard interaction, and focus feedback.
+- In both themes, add buttons use blue backgrounds with white icons, and delete buttons use red backgrounds with white icons/text, including deletion confirmation. Hover/pressed states darken these fills; disabled controls retain disabled styling. Preserve standard egui theme selection, button padding, footer alignment, keyboard interaction and focus feedback.
 - Sorting must preserve saved manual order and group boundaries. Sort individual runs and group children within their own scope; use stored indices and group identity for row actions rather than sorted display positions.
 - Missing metadata is a supported state, including adjacent mods where one or both lack metadata. Comparators must remain deterministic and consistent. Cover these cases when changing sorting.
 - Preserve the persisted interpretation of sorting settings, including the existing `is_ascending` field, unless an explicit behavior change includes compatibility handling.

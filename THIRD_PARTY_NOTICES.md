@@ -2,11 +2,11 @@
 
 ## Desktop log and window support
 
-The live log uses Chrono 0.4.31 (MIT OR Apache-2.0) for local timestamps.
+The live log uses Chrono 0.4.31 (MIT OR Apache-2.0) for readable UTC timestamps.
 Windows title-bar popup dismissal uses raw-window-handle 0.6.2
 (MIT OR Apache-2.0 OR Zlib) to access the existing native window.
 Both packages were already present in the dependency graph; their versions
-are unchanged. Chrono disables default features and enables its clock feature;
+are unchanged. Chrono disables default features and enables its std feature;
 raw-window-handle has no runtime dependencies.
 
 Sources: https://github.com/chronotope/chrono and

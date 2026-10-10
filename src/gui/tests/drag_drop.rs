@@ -83,6 +83,7 @@ fn hover_expands_temporarily_and_successful_drop_keeps_the_group_open() {
         "Hover group".into(),
         ModGroup {
             mods: vec![member.clone()],
+            ..Default::default()
         },
     );
     test.app.state.mod_data.get_active_profile_mut().mods = vec![
@@ -156,11 +157,13 @@ fn dragging_between_groups_and_reordering_members_and_groups_preserves_contents(
     let first = test.local_mod("first.pak");
     let second = test.local_mod("second.pak");
     for (name, config) in [("A", first.clone()), ("B", second.clone())] {
-        test.app
-            .state
-            .mod_data
-            .groups
-            .insert(name.into(), ModGroup { mods: vec![config] });
+        test.app.state.mod_data.groups.insert(
+            name.into(),
+            ModGroup {
+                mods: vec![config],
+                ..Default::default()
+            },
+        );
     }
     test.app.state.mod_data.get_active_profile_mut().mods = ["A", "B"]
         .into_iter()

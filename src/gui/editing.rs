@@ -183,7 +183,7 @@ impl App {
             _ => String::new(),
         };
         let description = diagnostics::redact(
-            &format!("{action:?}; item={item:?}"),
+            &edit_message(&action, &item, &before),
             self.state
                 .config
                 .provider_parameters
@@ -215,14 +215,26 @@ impl App {
                     .retain(|profile| self.state.mod_data.profiles.contains_key(profile));
                 if before != **self.state.mod_data {
                     if self.report_save(self.state.mod_data.save()) {
-                        tracing::info!(operation = %description, "Profile edit saved");
+                        tracing::info!("{description}");
                     } else {
-                        tracing::warn!(operation = %description, "Profile edit applied in memory but could not be saved");
+                        tracing::warn!(
+                            "Profile edit applied in memory but could not be saved. {description}"
+                        );
                     }
                 }
             }
             Err(error) => {
-                tracing::warn!(operation = %description, %error, "Profile edit rejected; nothing changed");
+                let error_text = diagnostics::redact(
+                    &error.to_string(),
+                    self.state
+                        .config
+                        .provider_parameters
+                        .values()
+                        .flat_map(|p| p.values().cloned()),
+                );
+                tracing::warn!(
+                    "Profile edit rejected; nothing changed. Attempted change: {description} Reason: {error_text}"
+                );
                 self.last_action = Some(LastAction::failure(error.to_string()));
             }
         }
@@ -258,7 +270,7 @@ impl App {
                     (
                         cancel.clicked(),
                         ui.add_enabled_ui(!busy, |ui| {
-                            ui.add_sized(button_size, egui::Button::new(dialog.action))
+                            super::icons::delete_button(ui, dialog.action, button_size)
                         })
                         .inner
                         .clicked(),
@@ -277,6 +289,79 @@ impl App {
         } else if response.inner.1 {
             let dialog = self.delete_confirmation.take().unwrap();
             self.finish_edit(dialog.edit);
+        }
+    }
+}
+
+fn edit_message(action: &Edit, item: &str, data: &crate::state::ModData_v0_1_0) -> String {
+    let location = |target: &ListTarget| match &target.group {
+        Some(group) => format!("shared group {group:?}"),
+        None => format!("profile {:?}", target.profile),
+    };
+    match action {
+        Edit::DeleteEntry(target) => format!(
+            "Removed {item:?} from {}. Mod files were kept.",
+            location(target)
+        ),
+        Edit::DeleteProfile(name) => {
+            format!("Deleted profile {name:?}. Shared groups and mod files were kept.")
+        }
+        Edit::CreateGroup { profile, name } => {
+            format!("Created group {name:?} in profile {profile:?}.")
+        }
+        Edit::AttachGroup { profile, name } => {
+            format!("Added shared group {name:?} to profile {profile:?}.")
+        }
+        Edit::RenameGroup { name, replacement } => {
+            format!("Renamed shared group {name:?} to {replacement:?}.")
+        }
+        Edit::DeleteGroup(name) => {
+            format!("Deleted shared group {name:?} from all profiles. Mod files were kept.")
+        }
+        Edit::SetGroupColor { name, color } => format!(
+            "Changed color of shared group {name:?} to {}.",
+            super::group_colors::palette(*color, false).0
+        ),
+        Edit::MoveMod {
+            source,
+            destination,
+        } => {
+            let destination = ListTarget {
+                profile: source.profile.clone(),
+                group: destination.clone(),
+                index: 0,
+            };
+            format!(
+                "Moved {item:?} from {} to {}.",
+                location(source),
+                location(&destination)
+            )
+        }
+        Edit::MoveEntry {
+            source,
+            destination,
+        } => {
+            if source.profile == destination.profile && source.group == destination.group {
+                format!("Reordered {item:?} within {}.", location(source))
+            } else {
+                format!(
+                    "Moved {item:?} from {} to {}.",
+                    location(source),
+                    location(destination)
+                )
+            }
+        }
+        Edit::Ungroup { profile, index } => {
+            let name = data
+                .profiles
+                .get(profile)
+                .and_then(|p| p.mods.get(*index))
+                .and_then(|entry| match entry {
+                    ModOrGroup::Group { group_name, .. } => Some(group_name.as_str()),
+                    _ => None,
+                })
+                .unwrap_or("unavailable group");
+            format!("Ungrouped {name:?} in profile {profile:?}. The shared group was kept.")
         }
     }
 }
