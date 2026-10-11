@@ -4,6 +4,8 @@
 
 ## [Unreleased] - ReleaseDate
 
+- Fix temporary executables left behind by Windows application updates. Cleanup waits for the app to exit and retries temporary file locks, while failed or interrupted replacements retain the previous executable.
+
 ## [0.5.2] - 2026-10-11
 
 - Add a Show notifications setting, enabled by default, to hide all snackbars while keeping footer status and error details available. The choice is saved across restarts.

@@ -171,7 +171,13 @@ fn extract(archive: &Path, directory: &Path) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests;
 
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+pub use windows::replace_current_executable;
+
 /// Keep a recoverable copy even if the platform replacement fails after moving the old image.
+#[cfg(not(windows))]
 pub fn replace_current_executable(candidate: &Path) -> Result<()> {
     let executable = std::env::current_exe()?;
     let backup = tempfile::Builder::new()
