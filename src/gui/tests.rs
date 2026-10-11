@@ -1,5 +1,6 @@
 use super::sorting::sorted_mod_indices;
 use super::*;
+mod app_update;
 mod disclosure;
 mod drag_drop;
 mod editing;
@@ -680,7 +681,11 @@ fn settings_width_is_stable_when_notices_are_expanded_and_collapsed() {
                 (current.width() - initial.width()).abs() <= 1.0,
                 "{theme:?}, expanded {expanded}: initial {initial:?}, current {current:?}"
             );
-            assert_eq!(current.height() > initial.height() + 100.0, expanded);
+            assert_eq!(
+                current.height() > initial.height() + 100.0,
+                expanded,
+                "{theme:?}: initial {initial:?}, current {current:?}"
+            );
         }
     }
 }

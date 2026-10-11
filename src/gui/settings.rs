@@ -117,12 +117,15 @@ impl App {
     }
 
     pub(super) fn show_settings(&mut self, ctx: &egui::Context) {
+        let mut check_update = false;
+        let mut view_update = false;
         if let Some(window) = &mut self.settings_window {
             let mut open = true;
             let mut try_save = false;
             egui::Window::new("Settings")
                 .open(&mut open)
                 .resizable(false)
+                .default_height((ctx.screen_rect().height() - 64.0).clamp(160.0, 640.0))
                 .show(ctx, |ui| {
                     egui::Grid::new("grid").num_columns(2).striped(true).show(ui, |ui| {
                         let mut job = LayoutJob::default();
@@ -242,6 +245,19 @@ impl App {
                             ui.colored_label(ui.visuals().error_fg_color, error);
                         }
                     });
+                    ui.separator();
+                    ui.label("Application updates");
+                    ui.label(concat!("Current version: ", env!("CARGO_PKG_VERSION")));
+                    ui.horizontal_wrapped(|ui| {
+                        check_update = ui.add_enabled(self.check_updates_rid.is_none() && self.self_update_rid.is_none() && self.original_exe_path.is_none(), egui::Button::new("Check for updates")).clicked();
+                        if self.available_update.is_some() {
+                            view_update = ui.button("View update").clicked();
+                        }
+                    });
+                    if !self.app_update_status.is_empty() {
+                        ui.add(egui::Label::new(&self.app_update_status).wrap());
+                    }
+                    ui.separator();
                     icons::collapsing_header("Third-party notices").show(ui, |ui| {
                         egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
                             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
@@ -271,6 +287,12 @@ impl App {
             } else if !open {
                 self.settings_window = None;
             }
+        }
+        if check_update {
+            message::CheckUpdates::send(self, ctx, true);
+        }
+        if view_update {
+            self.show_app_update = true;
         }
     }
 }
