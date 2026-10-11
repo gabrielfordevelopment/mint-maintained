@@ -4,6 +4,10 @@
 
 ## [Unreleased] - ReleaseDate
 
+## [0.5.2] - 2026-10-11
+
+- Add a Show notifications setting, enabled by default, to hide all snackbars while keeping footer status and error details available. The choice is saved across restarts.
+
 ## [0.5.1] - 2026-10-11
 
 ### Application update fixes
@@ -145,6 +149,7 @@ MINT Maintained features.
 
 <!-- next-url -->
 [Unreleased]: https://github.com/gabrielfordevelopment/mint-maintained/compare/master...develop
+[0.5.2]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.5.2
 [0.5.1]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.5.1
 [0.5.0]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.5.0
 [0.4.0]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.4.0

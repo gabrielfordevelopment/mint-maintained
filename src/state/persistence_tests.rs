@@ -1,6 +1,51 @@
 use super::*;
 
 #[test]
+fn notifications_default_on_for_old_configs_and_disabled_choice_survives_reload() {
+    assert!(VersionAnnotatedConfig::default().show_notifications);
+    for versioned in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let dirs = Dirs::from_path(directory.path()).unwrap();
+        let path = dirs.config_dir.join("config.json");
+        let mut value = serde_json::json!({
+            "provider_parameters": {}, "drg_pak_path": null,
+            "gui_theme": null, "sorting_config": null
+        });
+        if versioned {
+            value["version"] = "0.0.0".into();
+        }
+        fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+        {
+            let mut state = State::init(dirs.clone()).unwrap();
+            assert!(state.config.show_notifications);
+            state.config.show_notifications = false;
+            state.config.save().unwrap();
+        }
+        let state = State::init(dirs).unwrap();
+        assert!(!state.config.show_notifications);
+        assert!(state.config.provider_parameters.is_empty());
+        assert!(state.config.drg_pak_path.is_none());
+    }
+}
+
+#[test]
+fn invalid_notification_setting_preserves_config_bytes() {
+    for setting in [serde_json::json!(null), serde_json::json!("false")] {
+        let directory = tempfile::tempdir().unwrap();
+        let dirs = Dirs::from_path(directory.path()).unwrap();
+        let path = dirs.config_dir.join("config.json");
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "version": "0.0.0", "provider_parameters": {}, "drg_pak_path": null,
+            "gui_theme": null, "sorting_config": null, "show_notifications": setting
+        }))
+        .unwrap();
+        fs::write(&path, &bytes).unwrap();
+        assert!(State::init(dirs).is_err());
+        assert_eq!(fs::read(path).unwrap(), bytes);
+    }
+}
+
+#[test]
 fn group_colors_default_for_old_data_and_survive_reload_and_rename() {
     use crate::state::edits::Edit;
     let old: ModGroup = serde_json::from_str(r#"{"mods":[]}"#).unwrap();

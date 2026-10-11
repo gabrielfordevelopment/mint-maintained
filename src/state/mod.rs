@@ -441,6 +441,8 @@ pub struct Config {
     pub provider_parameters: HashMap<String, HashMap<String, String>>,
     pub drg_pak_path: Option<PathBuf>,
     pub gui_theme: Option<GuiTheme>,
+    #[serde(default = "default_true")]
+    pub show_notifications: bool,
     pub sorting_config: Option<SortingConfig>,
 }
 
@@ -515,6 +517,7 @@ impl Default for Config!["0.0.0"] {
                 .as_ref()
                 .map(DRGInstallation::main_pak),
             gui_theme: None,
+            show_notifications: default_true(),
             sorting_config: None,
         }
     }
@@ -600,6 +603,7 @@ fn read_config_or_default(config_path: &PathBuf) -> Result<VersionAnnotatedConfi
                     VersionAnnotatedConfig::V0_0_0(Config_v0_0_0 {
                         provider_parameters: legacy.provider_parameters,
                         drg_pak_path: legacy.drg_pak_path,
+                        show_notifications: legacy.show_notifications,
                         ..Default::default()
                     })
                 }

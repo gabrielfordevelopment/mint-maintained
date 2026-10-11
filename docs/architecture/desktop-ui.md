@@ -11,6 +11,8 @@
 
 Keep network and blocking integration outside the egui frame. When changing cancellation, profile switching, or result handling, inspect both dispatch and receive paths, including stale completion, failure, and progress updates. Preserve resolved mod/load ordering across asynchronous work.
 
+Settings exposes Show notifications, enabled by default and saved immediately. When disabled, the notification owner clears visible and queued snackbars, including errors, and consumes background statuses without presenting them later. Re-enabling shows only new notifications. Footer status, manually opened details, confirmation dialogs and toolbar Undo/Redo remain available.
+
 ## Profile and group editing
 
 [history.rs](../../src/gui/history.rs) owns a shared, in-memory undo/redo history of at most 50 profile/mod-data changes. Every GUI mod-data save goes through `save_mod_data`, including imports, profile edits, shared-group operations, mod versions, priorities and toggles. Snapshots share adjacent states and cover all profiles and groups together; profile selection alone does not create an edit. Sorting, expansion, settings, copying and game/cache operations are outside this history. A drag's switch to Manual remains a view setting when undoing the saved list order. New content edits discard redo; restarting starts with empty history. Unsaved edits remain tracked in memory, but emit no success notification. Failed undo/redo saves restore the prior in-memory state and leave the cursor unchanged for retry. Unknown content changes are rejected rather than overwritten.

@@ -119,6 +119,7 @@ impl App {
     pub(super) fn show_settings(&mut self, ctx: &egui::Context) {
         let mut check_update = false;
         let mut view_update = false;
+        let mut notifications_changed = false;
         if let Some(window) = &mut self.settings_window {
             let mut open = true;
             let mut try_save = false;
@@ -223,6 +224,10 @@ impl App {
                         });
                         ui.end_row();
 
+                        ui.label("Notifications:");
+                        notifications_changed = ui.checkbox(&mut self.state.config.show_notifications, "Show notifications").changed();
+                        ui.end_row();
+
                         ui.label("Mod providers:");
                         ui.end_row();
 
@@ -287,6 +292,9 @@ impl App {
             } else if !open {
                 self.settings_window = None;
             }
+        }
+        if notifications_changed {
+            self.report_save(self.state.config.save());
         }
         if check_update {
             message::CheckUpdates::send(self, ctx, true);
