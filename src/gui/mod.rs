@@ -9,6 +9,7 @@ mod groups;
 mod history;
 mod icons;
 mod inputs;
+mod installation;
 mod lint;
 mod log_window;
 mod message;
@@ -21,6 +22,7 @@ mod request_counter;
 mod settings;
 mod sorting;
 mod toggle_switch;
+mod updates;
 
 #[cfg(test)]
 mod tests;
@@ -170,6 +172,9 @@ pub struct App {
     last_action: Option<LastAction>,
     notifications: notifications::Notifications,
     history: history::History,
+    installation_status: installation::InstallationStatus,
+    refresh_progress: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    refresh_total: usize,
     available_update: Option<GitHubRelease>,
     show_update_time: Option<SystemTime>,
     open_profiles: HashSet<String>,
@@ -209,6 +214,7 @@ struct LastAction {
     status: LastActionStatus,
     notified: bool,
     undo_id: Option<u64>,
+    report: Option<std::sync::Arc<crate::providers::refresh::RefreshReport>>,
 }
 impl LastAction {
     fn success(msg: String) -> Self {
@@ -217,6 +223,7 @@ impl LastAction {
             status: LastActionStatus::Success(msg),
             notified: false,
             undo_id: None,
+            report: None,
         }
     }
     fn failure(msg: String) -> Self {
@@ -225,6 +232,7 @@ impl LastAction {
             status: LastActionStatus::Failure(msg),
             notified: false,
             undo_id: None,
+            report: None,
         }
     }
     fn timeago(&self) -> String {
@@ -281,6 +289,9 @@ impl App {
             last_action: None,
             notifications: Default::default(),
             history,
+            installation_status: Default::default(),
+            refresh_progress: Default::default(),
+            refresh_total: 0,
             available_update: None,
             show_update_time: None,
             open_profiles: Default::default(),
@@ -315,8 +326,11 @@ impl App {
     }
 
     fn show_error_window(&mut self, ctx: &egui::Context) {
+        let enabled = !self.editing_busy();
+        let mut retry = None;
         if let Some(LastAction {
-            status: LastActionStatus::Failure(details),
+            status: LastActionStatus::Failure(details) | LastActionStatus::Success(details),
+            report,
             ..
         }) = &mut self.last_action
         {
@@ -329,11 +343,25 @@ impl App {
                     .flat_map(|parameters| parameters.values().cloned()),
             );
             if self.show_error_details {
-                egui::Window::new("Error details")
-                    .open(&mut self.show_error_details)
-                    .default_size([520.0, 280.0])
-                    .show(ctx, |ui| diagnostics::details_ui(ui, details));
+                egui::Window::new(if report.is_some() {
+                    "Update check details"
+                } else {
+                    "Error details"
+                })
+                .open(&mut self.show_error_details)
+                .default_size([520.0, 280.0])
+                .show(ctx, |ui| {
+                    if let Some(report) = report {
+                        retry = updates::report_ui(ui, report, enabled);
+                    } else {
+                        diagnostics::details_ui(ui, details);
+                    }
+                });
             }
+        }
+        if let Some(specs) = retry {
+            self.show_error_details = false;
+            message::UpdateCache::send_specs(self, ctx, specs);
         }
     }
 
@@ -508,6 +536,8 @@ impl eframe::App for App {
 
         // begin draw
         self.history_shortcuts(ctx);
+        let busy = self.editing_busy();
+        self.installation_status.poll(&self.state, ctx, busy);
 
         self.show_update_window(ctx);
         self.show_provider_parameters(ctx);
@@ -518,7 +548,12 @@ impl eframe::App for App {
         self.show_error_window(ctx);
         self.show_groups(ctx);
 
-        egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
+        let footer = egui::TopBottomPanel::bottom("bottom_panel").frame(
+            egui::Frame::side_top_panel(&ctx.style()).inner_margin(egui::Margin::symmetric(8, 8)),
+        );
+        footer.show(ctx, |ui| {
+            self.status_row(ui);
+            ui.add(egui::Separator::default().spacing(6.0));
             let size = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
             let layout = egui::Layout::right_to_left(Align::Center);
             ui.allocate_ui_with_layout(size, layout, |ui| {
@@ -625,19 +660,24 @@ impl eframe::App for App {
                                 }
                             }
                         });
-
-                        if ui
-                            .button("Update cache")
-                            .on_hover_text(
-                                "Checks for updates for all mods and updates local cache",
-                            )
-                            .clicked()
-                        {
-                            message::UpdateCache::send(self, ctx);
-                            self.problematic_mod_id = None;
-                        }
                     },
                 );
+                ui.add_enabled_ui(!self.editing_busy(), |ui| {
+                    ui.menu_button("Check updates", |ui| {
+                        if ui.button("Current profile").clicked() {
+                            message::UpdateCache::send_specs(
+                                self,
+                                ctx,
+                                self.profile_update_specs(),
+                            );
+                            ui.close_menu();
+                        }
+                        if ui.button("All cached mods").clicked() {
+                            message::UpdateCache::send(self, ctx);
+                            ui.close_menu();
+                        }
+                    });
+                });
                 if let Some(integration) = &self.integrate_rid {
                     let cancelled = integration.cancellation.as_ref().unwrap();
                     if ui
@@ -651,17 +691,28 @@ impl eframe::App for App {
                     }
                     ui.spinner();
                 }
-                if self.update_rid.is_some() {
-                    if ui.button("Cancel").clicked() {
-                        self.update_rid.take().unwrap().handle.abort();
+                if let Some(update) = &self.update_rid {
+                    let cancelling = update
+                        .cancellation
+                        .as_ref()
+                        .is_some_and(|c| c.load(std::sync::atomic::Ordering::Acquire));
+                    if ui
+                        .add_enabled(
+                            !cancelling && !update.handle.is_finished(),
+                            egui::Button::new(if cancelling {
+                                "Cancelling..."
+                            } else {
+                                "Cancel"
+                            }),
+                        )
+                        .clicked()
+                        && let Some(flag) = update.cancellation.as_ref()
+                    {
+                        flag.store(true, std::sync::atomic::Ordering::Release);
                     }
                     ui.spinner();
                 }
-                if ui
-                    .button("Lint mods")
-                    .on_hover_text("Lint mods in the current profile")
-                    .clicked()
-                {
+                if ui.button("Check mod files").clicked() {
                     self.lints_toggle_window = Some(WindowLintsToggle);
                 }
                 if icons::button(ui, Icon::Settings, "Open settings").clicked() {
@@ -681,42 +732,6 @@ impl eframe::App for App {
                     ui.ctx()
                         .open_url(egui::OpenUrl::new_tab(&available_update.html_url));
                 }
-                ui.with_layout(egui::Layout::left_to_right(Align::TOP), |ui| {
-                    if let Some(last_action) = &self.last_action {
-                        let msg = match &last_action.status {
-                            LastActionStatus::Success(msg) => {
-                                ui.label(
-                                    egui::RichText::new("STATUS")
-                                        .color(Color32::BLACK)
-                                        .background_color(Color32::LIGHT_GREEN),
-                                );
-                                msg
-                            }
-                            LastActionStatus::Failure(msg) => {
-                                ui.label(
-                                    egui::RichText::new("STATUS")
-                                        .color(Color32::BLACK)
-                                        .background_color(Color32::LIGHT_RED),
-                                );
-                                msg
-                            }
-                        };
-                        ui.ctx().request_repaint(); // for continuously updating time
-                        if matches!(last_action.status, LastActionStatus::Failure(_))
-                            && ui.button("Details").clicked()
-                        {
-                            self.show_error_details = true;
-                        }
-                        ui.add(
-                            egui::Label::new(format!(
-                                "({}): {}",
-                                last_action.timeago(),
-                                msg.lines().next().unwrap_or_default()
-                            ))
-                            .truncate(),
-                        );
-                    }
-                });
             });
         });
         egui::CentralPanel::default().show(ctx, |ui| {

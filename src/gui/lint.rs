@@ -5,13 +5,16 @@ impl App {
         if let Some(_lints_toggle) = &self.lints_toggle_window {
             let mut open = true;
 
-            egui::Window::new("Toggle lints")
+            egui::Window::new("Check mod files")
                 .open(&mut open)
                 .resizable(false)
                 .show(ctx, |ui| {
+                    ui.set_max_width(460.0);
+                    ui.label("Check enabled mods in this profile for conflicting files and packaging problems. Missing mod files may be downloaded. Nothing is installed into the game.");
+                    ui.weak("Enable the checks below, then generate a report. A clean report does not guarantee in-game compatibility.");
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         egui::Grid::new("lints-toggle-grid").show(ui, |ui| {
-                            ui.heading("Lint");
+                            ui.heading("Check");
                             ui.heading("Enabled?");
                             ui.end_row();
 
@@ -39,7 +42,7 @@ impl App {
                             ui.add(toggle_switch(&mut self.lint_options.empty_archive));
                             ui.end_row();
 
-                            ui.label("Mods containing oudated pak version");
+                            ui.label("Mods containing outdated pak version");
                             ui.add(toggle_switch(&mut self.lint_options.outdated_pak_version));
                             ui.end_row();
 
@@ -75,8 +78,7 @@ impl App {
                         if ui
                             .add_enabled(
                                 self.check_updates_rid.is_none()
-                                    && self.integrate_rid.is_none()
-                                    && self.lint_rid.is_none(),
+                                    && !self.editing_busy(),
                                 egui::Button::new("Generate report"),
                             )
                             .clicked()
@@ -152,11 +154,19 @@ impl App {
         if self.lint_report_window.is_some() {
             let mut open = true;
 
-            egui::Window::new("Lint results")
+            egui::Window::new("Mod file check results")
                 .open(&mut open)
                 .resizable(true)
                 .show(ctx, |ui| {
                     if let Some(report) = &self.lint_report {
+                        let (checked, flagged) = report.check_counts();
+                        ui.label(if checked == 0 {
+                            "No checks were selected. Enable a check, then generate a new report.".into()
+                        } else if flagged == 0 {
+                            format!("No problems found. Checks completed: {checked}.")
+                        } else {
+                            format!("Checks completed: {checked}. Checks with findings: {flagged}.")
+                        });
                         let scroll_height =
                             (ui.available_height() - 30.0).clamp(0.0, f32::INFINITY);
                         egui::ScrollArea::vertical()

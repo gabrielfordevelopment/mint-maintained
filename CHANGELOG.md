@@ -4,6 +4,14 @@
 
 ## [Unreleased] - ReleaseDate
 
+- Place groups before standalone mods in new and explicitly arranged profiles, including drag-and-drop and imports. Older layouts retain their load order until Arrange groups is confirmed.
+- Add update checks for individual mod.io mods, the current profile or all cached mods, without changing pinned versions.
+- Pace mod.io requests, respect server retry delays, and allow cancelling waits while retaining successful cache updates.
+- Show structured per-mod refresh errors, copyable technical details and retry actions for failed or remaining checks.
+- Track installed mod versions and effective profile changes; show when Install mods is needed and when older installations cannot be compared.
+- Separate footer status from action buttons while retaining colored feedback, and rename Lint mods to Check mod files with an explanation.
+- Explain empty mod-file reports and distinguish unselected checks from checks that found no problems.
+
 ## [0.4.0] - 2026-10-10
 
 - Add dismissible notifications with centered icons, a ten-second progress indicator that pauses on hover, and persistent error details.

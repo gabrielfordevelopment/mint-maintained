@@ -15,6 +15,7 @@
 | --- | --- |
 | `src/main.rs`, `src/lib.rs` | CLI, startup, application directories, shared application helpers |
 | `src/gui/mod.rs`, `src/gui/message.rs` | egui application shell, asynchronous operation dispatch and results |
+| `src/gui/updates.rs`, `src/gui/installation.rs` | Scoped update controls, structured refresh reports, footer status and asynchronous installation comparison |
 | `src/gui/mod_list.rs`, `sorting.rs`, `settings.rs`, `lint.rs` | Mod rows, display ordering, settings/provider dialogs, lint selection and reports |
 | `src/gui/editing.rs`, `groups.rs`, `src/state/edits.rs` | Deletion confirmation, shared-group management, validated profile/group operations |
 | `src/gui/drag_drop.rs`, `src/gui/log_window.rs` | Drag targets and feedback; bounded asynchronous log reader and native log viewport |
@@ -23,7 +24,9 @@
 | `src/state/`, `src/state/settings.rs` | Settings types, profiles, groups, versioned serialization, migrations, JSON persistence |
 | `src/windows_startup.rs` | Windows parent-console attachment while preserving redirected CLI streams |
 | `src/providers/` | Local/HTTP/mod.io providers, metadata and blob caches, dependency resolution and downloads |
+| `src/providers/refresh.rs`, `src/providers/modio/rate_limit.rs` | Partial update checks, retry/cancellation and shared mod.io request scheduling |
 | `src/integrate.rs`, `src/mod_lints/` | Game pak integration, hook installation/uninstallation, mod validation |
+| `src/integrate/status.rs` | Versioned installation record inside the staged pak and read-only compatibility handling |
 | `mint_lib/` | Shared mod/game contracts, installation discovery, logging, update URLs and build metadata |
 | `hook/`, `hook_resolvers/` | Windows proxy DLL, Unreal runtime hooks, game-memory signature resolution |
 | `tests/`, `test_assets/` | Integration tests and their fixtures |
@@ -47,7 +50,7 @@
 - Reuse the SVG controls in `src/gui/icons.rs`; keep vector sources in `assets/icons/`. Avoid Unicode stand-ins for existing icons and unnecessary texture regeneration each frame.
 - In both themes, add buttons use blue backgrounds with white icons, and delete buttons use red backgrounds with white icons/text, including deletion confirmation. Hover/pressed states darken these fills; disabled controls retain disabled styling. Preserve standard egui theme selection, button padding, footer alignment, keyboard interaction and focus feedback.
 - Sorting must preserve saved manual order and group boundaries. Sort individual runs and group children within their own scope; use stored indices and group identity for row actions rather than sorted display positions.
-- New and explicitly arranged profiles keep standalone mods before all groups. Clamp root drag targets to the appropriate section and show the actual insertion boundary. Never silently reorder old mixed profiles: require the Arrange groups confirmation before structural group edits or dragging; Cancel preserves their saved load order. Non-structural edits and imports remain available.
+- New and explicitly arranged profiles keep all groups before standalone mods. Clamp root drag targets to the appropriate section and show the actual insertion boundary. Never silently reorder older layouts, including standalone-first profiles: require the Arrange groups confirmation before structural group edits or dragging; Cancel preserves their saved load order. Non-structural edits and imports remain available.
 - Missing metadata is a supported state, including adjacent mods where one or both lack metadata. Comparators must remain deterministic and consistent. Cover these cases when changing sorting.
 - Preserve the persisted interpretation of sorting settings, including the existing `is_ascending` field, unless an explicit behavior change includes compatibility handling.
 - Keep network, downloads, and integration work outside the UI frame. Preserve request-ID checks that prevent stale asynchronous results from replacing current state.

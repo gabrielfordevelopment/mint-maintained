@@ -64,6 +64,7 @@ pub enum Icon {
     Close,
     Undo,
     Redo,
+    Update,
 }
 
 impl Icon {
@@ -91,6 +92,7 @@ impl Icon {
             Self::Close => include_bytes!("../../assets/icons/notification_close.svg"),
             Self::Undo => include_bytes!("../../assets/icons/history_undo.svg"),
             Self::Redo => include_bytes!("../../assets/icons/history_redo.svg"),
+            Self::Update => include_bytes!("../../assets/icons/notification_update.svg"),
         };
         let pixels = (size * ui.ctx().pixels_per_point()).round().max(1.0) as u32;
         let key = egui::Id::new(("material-icon", self as u8, size.to_bits()));
@@ -232,6 +234,7 @@ pub fn show(ui: &mut Ui, icon: Icon) -> Response {
     let color = match icon {
         Icon::Warning => ui.visuals().warn_fg_color,
         Icon::Error => ui.visuals().error_fg_color,
+        Icon::Update => ui.visuals().hyperlink_color,
         _ => ui.visuals().text_color(),
     };
     ui.add(icon.image(ui, color))

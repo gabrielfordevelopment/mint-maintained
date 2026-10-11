@@ -46,7 +46,7 @@ fn every_root_insertion_preserves_blocks_and_member_state() {
         assert!(!data.profiles["default"].has_mixed_order());
         assert!(data.groups["B"].mods.is_empty());
         assert_eq!(
-            data.profiles["default"].mods[destination.min(2)],
+            data.profiles["default"].mods[destination.max(2)],
             ModOrGroup::Individual(config("B"))
         );
     }
@@ -111,7 +111,7 @@ fn mixed_profiles_round_trip_unchanged_until_explicit_stable_arrangement() {
             .iter()
             .map(|s| s.url.as_str())
             .collect::<Vec<_>>(),
-        ["first", "second", "A", "B"]
+        ["A", "B", "first", "second"]
     );
     loaded.mod_data.save().unwrap();
     let reopened = State::init(dirs).unwrap();
@@ -119,7 +119,47 @@ fn mixed_profiles_round_trip_unchanged_until_explicit_stable_arrangement() {
 }
 
 #[test]
-fn ungrouping_later_group_places_members_before_all_remaining_groups() {
+fn released_standalone_first_profiles_keep_their_order_until_arranged() {
+    let mut data = grouped();
+    data.profiles
+        .get_mut("default")
+        .unwrap()
+        .mods
+        .rotate_left(2);
+    let original = data.clone();
+    let directory = tempfile::tempdir().unwrap();
+    let dirs = Dirs::from_path(directory.path()).unwrap();
+    let mut state = State::init(dirs.clone()).unwrap();
+    **state.mod_data = data;
+    state.mod_data.save().unwrap();
+    drop(state);
+    let mut loaded = State::init(dirs.clone()).unwrap();
+    assert_eq!(**loaded.mod_data, original);
+    assert!(loaded.mod_data.profiles["default"].has_mixed_order());
+    assert_eq!(
+        loaded
+            .mod_data
+            .enabled_mods_ordered("default")
+            .unwrap()
+            .iter()
+            .map(|spec| spec.url.as_str())
+            .collect::<Vec<_>>(),
+        ["first", "second", "A", "B"]
+    );
+    loaded
+        .mod_data
+        .apply_edit(Edit::ArrangeProfile("default".into()))
+        .unwrap();
+    assert_eq!(
+        loaded.mod_data.profiles["default"],
+        grouped().profiles["default"]
+    );
+    loaded.mod_data.save().unwrap();
+    assert_eq!(**State::init(dirs).unwrap().mod_data, **loaded.mod_data);
+}
+
+#[test]
+fn ungrouping_later_group_appends_members_to_the_standalone_section() {
     let mut data = grouped();
     data.apply_edit(Edit::AttachGroup {
         profile: "other".into(),
@@ -127,22 +167,22 @@ fn ungrouping_later_group_places_members_before_all_remaining_groups() {
     })
     .unwrap();
     if let ModOrGroup::Group { enabled, .. } =
-        &mut data.profiles.get_mut("default").unwrap().mods[3]
+        &mut data.profiles.get_mut("default").unwrap().mods[1]
     {
         *enabled = false;
     }
     let other = data.profiles["other"].clone();
     data.apply_edit(Edit::Ungroup {
         profile: "default".into(),
-        index: 3,
+        index: 1,
     })
     .unwrap();
     assert!(!data.profiles["default"].has_mixed_order());
     assert!(
-        matches!(&data.profiles["default"].mods[2], ModOrGroup::Individual(mc) if mc.spec.url == "B" && !mc.enabled)
+        matches!(&data.profiles["default"].mods[3], ModOrGroup::Individual(mc) if mc.spec.url == "B" && !mc.enabled)
     );
     assert!(
-        matches!(&data.profiles["default"].mods[3], ModOrGroup::Group { group_name, .. } if group_name == "A")
+        matches!(&data.profiles["default"].mods[0], ModOrGroup::Group { group_name, .. } if group_name == "A")
     );
     assert_eq!(data.groups["B"].mods, [config("B")]);
     assert_eq!(data.profiles["other"], other);

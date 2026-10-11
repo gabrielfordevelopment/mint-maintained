@@ -1,6 +1,8 @@
 use std::collections::VecDeque;
 
 use super::{App, LastActionStatus, diagnostics, icons::Icon};
+use crate::providers::{ModSpecification, refresh::RefreshReport};
+use std::sync::Arc;
 
 const LIFETIME: f64 = 10.0;
 const FADE: f64 = 0.18;
@@ -13,6 +15,7 @@ struct Notification {
     paused_at: Option<f64>,
     paused_total: f64,
     undo_id: Option<u64>,
+    report: Option<Arc<RefreshReport>>,
 }
 
 impl Notification {
@@ -60,6 +63,7 @@ impl Notification {
 pub(super) struct Notifications {
     queue: VecDeque<Notification>,
     details: Option<String>,
+    details_report: Option<Arc<RefreshReport>>,
 }
 
 impl Notifications {
@@ -69,14 +73,20 @@ impl Notifications {
     }
 
     pub(super) fn success(&mut self, text: impl Into<String>) {
-        self.push(text.into(), false, None);
+        self.push(text.into(), false, None, None);
     }
 
     pub(super) fn success_with_undo(&mut self, text: String, undo_id: Option<u64>) {
-        self.push(text, false, undo_id);
+        self.push(text, false, undo_id, None);
     }
 
-    fn push(&mut self, text: String, error: bool, undo_id: Option<u64>) {
+    fn push(
+        &mut self,
+        text: String,
+        error: bool,
+        undo_id: Option<u64>,
+        report: Option<Arc<RefreshReport>>,
+    ) {
         if let Some(existing) = self
             .queue
             .iter_mut()
@@ -86,6 +96,7 @@ impl Notifications {
             existing.closing = None;
             existing.paused_at = None;
             existing.paused_total = 0.0;
+            existing.report = report;
             return;
         }
         let notification = Notification {
@@ -96,6 +107,7 @@ impl Notifications {
             paused_at: None,
             paused_total: 0.0,
             undo_id,
+            report,
         };
         if error {
             if let Some(current) = self.queue.front_mut() {
@@ -114,7 +126,12 @@ impl Notifications {
         }
     }
 
-    pub(super) fn show(&mut self, ctx: &egui::Context, available_undo: Option<u64>) -> Option<u64> {
+    pub(super) fn show(
+        &mut self,
+        ctx: &egui::Context,
+        available_undo: Option<u64>,
+        can_retry: bool,
+    ) -> (Option<u64>, Option<Vec<ModSpecification>>) {
         let now = ctx.input(|i| i.time);
         let id = egui::Id::new("notification");
         let hovered = ctx.pointer_hover_pos().is_some_and(|pos| {
@@ -126,6 +143,7 @@ impl Notifications {
             notification.hover(now, hovered);
         }
         let mut undo = None;
+        let mut retry = None;
         if self.queue.front().is_some_and(|n| n.expired(now)) {
             self.queue.pop_front();
         }
@@ -134,7 +152,7 @@ impl Notifications {
             let opacity = notification.opacity(now);
             egui::Area::new(id)
                 .order(egui::Order::Foreground)
-                .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -38.0])
+                .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -(ctx.screen_rect().bottom() - ctx.available_rect().bottom() + 8.0)])
                 .movable(false)
                 .show(ctx, |ui| {
                     ui.set_opacity(opacity);
@@ -144,14 +162,15 @@ impl Notifications {
                             ui.set_width(
                                 (460.0_f32.min(ctx.screen_rect().width() - 24.0) - 94.0).max(80.0),
                             );
-                            let text = if notification.error {
+                            let text = if notification.error || notification.report.is_some() {
                                 notification.text.lines().next().unwrap_or("Operation failed")
                             } else {
                                 &notification.text
                             };
                             ui.add(egui::Label::new(text).wrap());
-                            if notification.error && ui.button("Details").clicked() {
+                            if (notification.error || notification.report.is_some()) && ui.button("Details").clicked() {
                                 self.details = Some(notification.text.clone());
+                                self.details_report = notification.report.clone();
                             }
                             if let Some(action) = notification.undo_id
                                 && ui.add_enabled(available_undo == Some(action), egui::Button::new("Undo"))
@@ -196,12 +215,19 @@ impl Notifications {
             egui::Window::new("Notification details")
                 .open(&mut open)
                 .default_size([520.0, 280.0])
-                .show(ctx, |ui| diagnostics::details_ui(ui, details));
+                .show(ctx, |ui| {
+                    if let Some(report) = &self.details_report {
+                        retry = super::updates::report_ui(ui, report, can_retry);
+                    } else {
+                        diagnostics::details_ui(ui, details);
+                    }
+                });
             if !open {
                 self.details = None;
+                self.details_report = None;
             }
         }
-        undo
+        (undo, retry)
     }
 }
 
@@ -226,14 +252,23 @@ impl App {
                 ),
                 error,
                 if error { None } else { action.undo_id },
+                action.report.clone(),
             );
         }
         let available = self
             .history_available()
             .then(|| self.history.undo_id())
             .flatten();
-        if let Some(id) = self.notifications.show(ctx, available) {
+        let (undo, retry) = self
+            .notifications
+            .show(ctx, available, !self.editing_busy());
+        if let Some(id) = undo {
             self.restore_history(false, Some(id));
+        }
+        if let Some(specs) = retry {
+            self.notifications.details = None;
+            self.notifications.details_report = None;
+            super::message::UpdateCache::send_specs(self, ctx, specs);
         }
     }
 }
@@ -258,7 +293,7 @@ mod tests {
                 ..Default::default()
             },
             |ctx| {
-                center.show(ctx, None);
+                center.show(ctx, None, true);
             },
         );
     }
@@ -303,7 +338,12 @@ mod tests {
         frame(&mut center, &ctx, 7.0, false);
         assert_eq!(center.queue.len(), 1);
         assert_eq!(center.queue[0].progress(7.0), 0.0);
-        center.push("Save failed\nOriginal error details".into(), true, None);
+        center.push(
+            "Save failed\nOriginal error details".into(),
+            true,
+            None,
+            None,
+        );
         frame(&mut center, &ctx, 8.0, false);
         center.success("Created group.");
         frame(&mut center, &ctx, 100.0, false);

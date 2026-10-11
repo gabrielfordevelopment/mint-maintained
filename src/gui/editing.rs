@@ -80,7 +80,7 @@ impl App {
             Edit::ArrangeProfile(profile) => Some((
                 "Arrange groups?",
                 format!(
-                    "Move all standalone mods before the groups in profile \"{profile}\"?\nThe relative order within each section and all group contents will be kept. This can change mod load order.\nAfter arranging, you can move entries and edit groups."
+                    "Move all groups before the standalone mods in profile \"{profile}\"?\nThe relative order within each section and all group contents will be kept. This can change mod load order.\nAfter arranging, you can move entries and edit groups."
                 ),
             )),
             Edit::DeleteEntry(target) => self.delete_description(target),
@@ -342,7 +342,7 @@ fn edit_message(action: &Edit, item: &str, data: &crate::state::ModData_v0_1_0) 
     };
     match action {
         Edit::ArrangeProfile(profile) => format!(
-            "Arranged profile {profile:?}: standalone mods first, then groups. Mod load order may have changed."
+            "Arranged profile {profile:?}: groups first, then standalone mods. Mod load order may have changed."
         ),
         Edit::DeleteEntry(target) => format!(
             "Removed {item:?} from {}. Mod files were kept.",

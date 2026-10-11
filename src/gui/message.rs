@@ -192,11 +192,12 @@ impl ResolveMods {
                             });
                         }
                     }
-                    app.state
-                        .mod_data
-                        .get_active_profile_mut()
-                        .mods
-                        .splice(0..0, additions.into_iter().map(ModOrGroup::Individual));
+                    let profile = app.state.mod_data.get_active_profile_mut();
+                    let index = profile.standalone_start();
+                    profile.mods.splice(
+                        index..index,
+                        additions.into_iter().map(ModOrGroup::Individual),
+                    );
                     app.resolve_mod = resolved_mods
                         .errors
                         .iter()
@@ -341,17 +342,30 @@ impl FetchModProgress {
 #[derive(Debug)]
 pub struct UpdateCache {
     rid: RequestID,
-    result: Result<(), ProviderError>,
+    result: crate::providers::refresh::RefreshReport,
 }
 
 impl UpdateCache {
     pub fn send(app: &mut App, ctx: &egui::Context) {
+        Self::send_specs(app, ctx, app.state.store.cached_mod_specs());
+    }
+
+    pub fn send_specs(app: &mut App, ctx: &egui::Context, specs: Vec<ModSpecification>) {
+        if app.editing_busy() || app.self_update_rid.is_some() {
+            return;
+        }
         let ctx = ctx.clone();
         let rid = app.request_counter.next();
         let tx = app.tx.clone();
         let store = app.state.store.clone();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let cancellation = Some(cancelled.clone());
+        app.refresh_progress = Default::default();
+        let specs = store.refresh_specs(specs);
+        app.refresh_total = specs.len();
+        let progress = app.refresh_progress.clone();
         let handle = spawn_reported(rid, ctx.clone(), tx.clone(), async move {
-            let res = store.update_cache().await;
+            let res = store.refresh_mods(specs, cancelled, progress).await;
             tx.send(Message::UpdateCache(UpdateCache { rid, result: res }))
                 .await
                 .unwrap();
@@ -362,31 +376,31 @@ impl UpdateCache {
             rid,
             handle,
             state: (),
-            cancellation: None,
+            cancellation,
         });
     }
 
     fn receive(self, app: &mut App) {
         if Some(self.rid) == app.update_rid.as_ref().map(|r| r.rid) {
-            match self.result {
-                Ok(()) => {
-                    info!("cache update complete");
-                    app.last_action = Some(LastAction::success(
-                        "successfully updated cache".to_string(),
-                    ));
-                }
-                Err(ProviderError::NoProvider { url: _, factory }) => {
-                    app.window_provider_parameters =
-                        Some(WindowProviderParameters::new(factory, &app.state));
-                    app.last_action = Some(LastAction::failure("no provider".to_string()));
-                }
-                Err(e) => {
-                    error!("{}", e);
-                    app.problematic_mod_id = e.opt_mod_id();
-                    app.last_action =
-                        Some(LastAction::failure(super::diagnostics::error_details(&e)));
-                }
-            }
+            let mut report = self.result;
+            let secrets = app
+                .state
+                .config
+                .provider_parameters
+                .values()
+                .flat_map(|p| p.values().cloned())
+                .collect::<Vec<_>>();
+            super::updates::redact_report(&mut report, &secrets);
+            let text = report.details();
+            let mut action = if report.failures.is_empty() && report.save_error.is_none() {
+                info!("{}", report.summary());
+                LastAction::success(text)
+            } else {
+                warn!("{}", report.summary());
+                LastAction::failure(text)
+            };
+            action.report = Some(Arc::new(report));
+            app.last_action = Some(action);
             app.update_rid = None;
         }
     }
@@ -581,8 +595,10 @@ impl LintMods {
                 Ok(report) => {
                     info!("lint mod report complete");
                     app.lint_report = Some(report);
-                    app.last_action =
-                        Some(LastAction::success("lint mod report complete".to_string()));
+                    app.last_action = Some(LastAction::success(
+                        "Mod file checks complete. Open the report to review the findings."
+                            .to_string(),
+                    ));
                 }
                 Err(ref e)
                     if let IntegrationError::ProviderError { source } = e

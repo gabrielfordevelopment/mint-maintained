@@ -245,15 +245,23 @@ impl ModData {
         if !self.groups.contains_key(name) {
             return Err(invalid("The group no longer exists."));
         }
-        let entries = self.profile_entries(profile)?;
+        let profile = self
+            .profiles
+            .get_mut(profile)
+            .ok_or_else(|| invalid("The profile no longer exists."))?;
+        let index = profile.standalone_start();
+        let entries = &mut profile.mods;
         if !entries
             .iter()
             .any(|e| matches!(e, ModOrGroup::Group { group_name, .. } if group_name == name))
         {
-            entries.push(ModOrGroup::Group {
-                group_name: name.into(),
-                enabled: true,
-            });
+            entries.insert(
+                index,
+                ModOrGroup::Group {
+                    group_name: name.into(),
+                    enabled: true,
+                },
+            );
         }
         Ok(())
     }
@@ -270,7 +278,7 @@ impl ModData {
         match edit {
             Edit::ArrangeProfile(profile) => {
                 self.profile_entries(&profile)?
-                    .sort_by_key(|entry| matches!(entry, ModOrGroup::Group { .. }));
+                    .sort_by_key(|entry| matches!(entry, ModOrGroup::Individual(_)));
             }
             Edit::SetGroupColor { name, color } => {
                 self.groups
@@ -388,7 +396,8 @@ impl ModData {
                     self.profiles
                         .get(&source.profile)
                         .ok_or_else(|| invalid("The profile no longer exists."))?
-                        .group_start()
+                        .mods
+                        .len()
                 };
                 let destination = ListTarget {
                     profile: source.profile.clone(),
@@ -423,7 +432,7 @@ impl ModData {
                     })
                     .collect();
                 let profile = self.profiles.get_mut(&profile).unwrap();
-                let index = profile.group_start();
+                let index = profile.mods.len();
                 profile
                     .mods
                     .splice(index..index, mods.into_iter().map(ModOrGroup::Individual));

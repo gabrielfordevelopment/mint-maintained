@@ -76,7 +76,7 @@ fn indexed_moves_reorder_shared_members_and_reject_invalid_destinations_atomical
     .unwrap();
     for _ in 0..2 {
         data.apply_edit(Edit::MoveEntry {
-            source: target(None, 0),
+            source: target(None, 1),
             destination: target(Some("Shared"), 0),
         })
         .unwrap();
@@ -119,7 +119,7 @@ fn indexed_moves_reorder_shared_members_and_reject_invalid_destinations_atomical
     })
     .unwrap();
     assert!(
-        matches!(&data.profiles["default"].mods[0], ModOrGroup::Individual(mc) if !mc.enabled && mc.spec.url == "first")
+        matches!(&data.profiles["default"].mods[1], ModOrGroup::Individual(mc) if !mc.enabled && mc.spec.url == "first")
     );
     assert_eq!(data.groups["Shared"].mods, [config("second")]);
     assert_eq!(data.group_users("Shared"), ["default", "other"]);
@@ -145,7 +145,7 @@ fn shared_groups_create_move_rename_detach_and_reload() {
     .unwrap();
     assert_eq!(data.profiles["other"].mods.len(), 1);
     data.apply_edit(Edit::MoveMod {
-        source: target(None, 0),
+        source: target(None, 1),
         destination: Some("Shared".into()),
     })
     .unwrap();
@@ -158,7 +158,7 @@ fn shared_groups_create_move_rename_detach_and_reload() {
     .unwrap();
     assert_eq!(data.group_users("Renamed"), ["default", "other"]);
     assert!(!data.groups.contains_key("Shared"));
-    data.apply_edit(Edit::DeleteEntry(target(None, 1))).unwrap();
+    data.apply_edit(Edit::DeleteEntry(target(None, 0))).unwrap();
     assert_eq!(data.group_users("Renamed"), ["other"]);
     assert_eq!(data.groups["Renamed"].mods, vec![config("first")]);
     let directory = tempfile::tempdir().unwrap();
@@ -200,7 +200,7 @@ fn ungroup_preserves_order_and_effective_enabled_state_without_changing_shared_d
         .unwrap();
     data.apply_edit(Edit::Ungroup {
         profile: "default".into(),
-        index: 2,
+        index: 0,
     })
     .unwrap();
     let mods: Vec<_> = data.profiles["default"]
@@ -235,7 +235,7 @@ fn moves_and_global_deletion_preserve_valid_references_and_other_entries() {
         .unwrap();
     }
     data.apply_edit(Edit::MoveMod {
-        source: target(None, 0),
+        source: target(None, 2),
         destination: Some("A".into()),
     })
     .unwrap();
@@ -253,7 +253,7 @@ fn moves_and_global_deletion_preserve_valid_references_and_other_entries() {
     .unwrap();
     assert!(data.groups["B"].mods.is_empty());
     assert!(
-        matches!(&data.profiles["default"].mods[1], ModOrGroup::Individual(mc) if mc.spec.url == "first")
+        matches!(&data.profiles["default"].mods[3], ModOrGroup::Individual(mc) if mc.spec.url == "first")
     );
     data.apply_edit(Edit::AttachGroup {
         profile: "other".into(),
