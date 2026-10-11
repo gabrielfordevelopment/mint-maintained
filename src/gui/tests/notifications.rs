@@ -13,6 +13,97 @@ fn notification_frame(test: &mut TestApp, time: f64) -> egui::FullOutput {
     )
 }
 
+fn toggle_notifications(test: &mut TestApp) {
+    test.full_frame(vec![]);
+    let frame = test.full_frame(vec![]);
+    test.full_click(text_rect(&frame, "Show notifications").center(), false);
+}
+
+#[test]
+fn notification_setting_hides_all_snackbars_without_replaying_old_messages() {
+    for dark in [false, true] {
+        let mut test = TestApp::new();
+        test.context.set_visuals(if dark {
+            egui::Visuals::dark()
+        } else {
+            egui::Visuals::light()
+        });
+        assert!(test.app.state.config.show_notifications);
+        test.app.notifications.success("Existing notification");
+        test.full_frame(vec![]);
+        assert_eq!(
+            button_rects(&test.full_frame(vec![]), "Dismiss notification").len(),
+            1
+        );
+        test.app.notifications.success("Queued notification");
+        test.app.settings_window = Some(WindowSettings::new(&test.app.state));
+        toggle_notifications(&mut test);
+        assert!(!test.app.state.config.show_notifications);
+        assert!(
+            !State::init(test.app.state.dirs.clone())
+                .unwrap()
+                .config
+                .show_notifications
+        );
+        assert!(button_rects(&test.full_frame(vec![]), "Dismiss notification").is_empty());
+
+        test.app.notifications.success("Copied while disabled");
+        test.app.last_action = Some(LastAction::failure("Failure while disabled".into()));
+        test.app.settings_window = None;
+        let frame = test.full_frame(vec![]);
+        assert!(button_rects(&frame, "Dismiss notification").is_empty());
+        assert!(test.app.last_action.as_ref().unwrap().notified);
+        assert_eq!(button_rects(&frame, "Details").len(), 1);
+        test.full_button("Details", false);
+        assert!(test.app.show_error_details);
+        test.app.show_error_details = false;
+
+        test.app.settings_window = Some(WindowSettings::new(&test.app.state));
+        toggle_notifications(&mut test);
+        assert!(test.app.state.config.show_notifications);
+        assert!(
+            State::init(test.app.state.dirs.clone())
+                .unwrap()
+                .config
+                .show_notifications
+        );
+        for _ in 0..3 {
+            assert!(button_rects(&test.full_frame(vec![]), "Dismiss notification").is_empty());
+        }
+        test.app.settings_window = None;
+        test.app.notifications.success("New notification");
+        test.full_frame(vec![]);
+        let frame = test.full_frame(vec![]);
+        assert_eq!(button_rects(&frame, "Dismiss notification").len(), 1);
+        assert!(text_rect(&frame, "New notification").is_positive());
+    }
+}
+
+#[test]
+fn notification_setting_save_failure_remains_visible_in_footer() {
+    let mut test = TestApp::new();
+    let path = test.app.state.dirs.config_dir.join("config.json");
+    std::fs::remove_file(&path).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    test.app.settings_window = Some(WindowSettings::new(&test.app.state));
+    toggle_notifications(&mut test);
+    assert!(!test.app.state.config.show_notifications);
+    assert!(matches!(
+        test.app.last_action.as_ref().unwrap().status,
+        LastActionStatus::Failure(_)
+    ));
+    assert!(button_rects(&test.full_frame(vec![]), "Dismiss notification").is_empty());
+    assert!(path.is_dir());
+    std::fs::remove_dir(&path).unwrap();
+    test.app.state.config.save().unwrap();
+    assert!(
+        !State::init(test.app.state.dirs.clone())
+            .unwrap()
+            .config
+            .show_notifications
+    );
+}
+
 #[test]
 fn notification_removal_requires_saved_change_and_cancel_stays_silent() {
     let mut test = TestApp::new();
