@@ -233,6 +233,12 @@ impl Notifications {
 
 impl App {
     pub(super) fn show_notifications(&mut self, ctx: &egui::Context) {
+        if !self.state.config.show_notifications {
+            self.notifications.queue.clear();
+            if let Some(action) = &mut self.last_action {
+                action.notified = true;
+            }
+        }
         if let Some(action) = &mut self.last_action
             && !action.notified
         {
