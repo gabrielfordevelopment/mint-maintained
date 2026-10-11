@@ -8,6 +8,7 @@ mod history;
 mod notifications;
 mod sorting_controls;
 mod unicode_text;
+mod updates;
 use crate::providers::ModResolution;
 use crate::state::ModGroup;
 
@@ -508,6 +509,7 @@ fn svg_icons_render_and_refresh_cached_textures_at_display_scale() {
         Icon::Close,
         Icon::Undo,
         Icon::Redo,
+        Icon::Update,
     ];
     for scale in [1.0, 1.5, 2.0] {
         context.set_pixels_per_point(scale);
@@ -609,8 +611,8 @@ fn footer_centers_text_and_icons_without_increasing_button_height() {
         let settings = button_rects(&output, "Open settings")[0];
         assert!(settings.top() > 470.0 && settings.bottom() <= 500.0);
         for label in [
-            "Lint mods",
-            "Update cache",
+            "Check mod files",
+            "Check updates",
             "Uninstall mods",
             "Install mods",
         ] {

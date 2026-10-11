@@ -3,6 +3,7 @@ use std::io::{BufReader, BufWriter, Cursor, ErrorKind, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
+pub mod status;
 mod transaction;
 use transaction::{StagedFile, check_cancelled, commit_files, lock_installation};
 
@@ -247,6 +248,7 @@ pub(crate) fn integrate_with_cancel<P: AsRef<Path>>(
     };
     let path_mod_pak = installation.paks_path().join("mods_P.pak");
     let _lock = lock_installation(&installation.paks_path())?;
+    let installation_record = status::InstallationRecord::from_mods(&mods)?;
 
     let mut fsd_pak_reader = BufReader::new(fs::File::open(path_pak.as_ref())?);
     let fsd_pak = repak::PakBuilder::new().reader(&mut fsd_pak_reader)?;
@@ -491,6 +493,9 @@ pub(crate) fn integrate_with_cancel<P: AsRef<Path>>(
     }
 
     bundle.write_meta(config, &mods)?;
+    let record = serde_json::to_vec(&installation_record)
+        .map_err(|e| IntegrationError::GenericError { msg: e.to_string() })?;
+    bundle.write_file(&record, status::ENTRY)?;
 
     let mut buf = vec![];
     asset_registry

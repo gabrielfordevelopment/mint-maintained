@@ -87,7 +87,7 @@ pub struct ModProfile {
     #[obake(cfg("0.0.0"))]
     pub mods: Vec<ModConfig>,
 
-    /// Standalone mods precede groups; older mixed profiles require explicit arrangement.
+    /// Groups precede standalone mods; older layouts require explicit arrangement.
     #[obake(cfg("0.1.0"))]
     pub mods: Vec<ModOrGroup>,
 }
@@ -100,24 +100,24 @@ pub enum ModOrGroup {
 }
 
 impl ModProfile_v0_1_0 {
-    pub fn group_start(&self) -> usize {
+    pub fn standalone_start(&self) -> usize {
         self.mods
             .iter()
-            .position(|entry| matches!(entry, ModOrGroup::Group { .. }))
+            .position(|entry| matches!(entry, ModOrGroup::Individual(_)))
             .unwrap_or(self.mods.len())
     }
 
     pub fn has_mixed_order(&self) -> bool {
-        self.mods[self.group_start()..]
+        self.mods[self.standalone_start()..]
             .iter()
-            .any(|entry| matches!(entry, ModOrGroup::Individual(_)))
+            .any(|entry| matches!(entry, ModOrGroup::Group { .. }))
     }
 
     pub fn insertion_index(&self, index: usize, is_group: bool) -> usize {
         if is_group {
-            index.max(self.group_start())
+            index.min(self.standalone_start())
         } else {
-            index.min(self.group_start())
+            index.max(self.standalone_start())
         }
     }
 }

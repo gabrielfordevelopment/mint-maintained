@@ -4,6 +4,22 @@
 
 ## [Unreleased] - ReleaseDate
 
+## [0.5.0] - 2026-10-11
+
+### Mod updates and installation status
+
+- Check for updates for one mod.io mod from its context menu, the current profile, or all cached mods. Checks refresh version information without installing files or changing pinned versions.
+- Space mod.io requests and respect numeric server retry delays, including waits longer than 30 seconds. Show the remaining wait and allow cancellation while keeping completed cache updates.
+- Show per-mod failures with readable reasons, expandable technical details and copyable reports. Retry failed checks or resume remaining checks without repeating successful ones.
+- Indicate when a pinned version differs from the latest known version, or when the selected version still needs to be installed. Use Install mods to apply changes to the game.
+- Track installed mod versions and effective profile changes, including load order and local file size/modification time. Older installations show an unknown tracking state until the next successful installation.
+
+### Desktop usability
+
+- Separate footer status and action buttons into two compact rows with consistent spacing and more room below the buttons. Keep colored status feedback and notifications above the footer.
+- Rename Lint mods to Check mod files and explain that it checks enabled mods for file conflicts and packaging problems. Distinguish unselected checks, clean reports and findings; a clean report does not guarantee in-game compatibility.
+- Place groups before standalone mods in new and explicitly arranged profiles, including imports and drag-and-drop. Existing layouts keep their saved load order until Arrange groups is confirmed; the arrangement supports Undo/Redo.
+
 ## [0.4.0] - 2026-10-10
 
 - Add dismissible notifications with centered icons, a ten-second progress indicator that pauses on hover, and persistent error details.
@@ -119,6 +135,7 @@ MINT Maintained features.
 
 <!-- next-url -->
 [Unreleased]: https://github.com/gabrielfordevelopment/mint-maintained/compare/master...develop
+[0.5.0]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.5.0
 [0.4.0]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.4.0
 [0.3.0]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.3.0
 [0.2.10]: https://github.com/trumank/mint/compare/v0.2.9...v0.2.10

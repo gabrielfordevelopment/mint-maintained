@@ -95,11 +95,11 @@ fn edit_logs_distinguish_saved_cancelled_rejected_and_unsaved_changes() {
         .mod_data
         .get_active_profile_mut()
         .mods
-        .insert(0, ModOrGroup::Individual(config));
+        .push(ModOrGroup::Individual(config));
     let target = ListTarget {
         profile: "default".into(),
         group: None,
-        index: 0,
+        index: 1,
     };
     test.app
         .request_edit(Edit::DeleteEntry(target.clone()), false);

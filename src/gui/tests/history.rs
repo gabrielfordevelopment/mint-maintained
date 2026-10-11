@@ -6,12 +6,12 @@ fn fixture() -> TestApp {
     let a = test.local_mod("A.pak");
     let b = test.local_mod("B.pak");
     test.app.state.mod_data.get_active_profile_mut().mods = vec![
-        ModOrGroup::Individual(a),
-        ModOrGroup::Individual(b),
         ModOrGroup::Group {
             group_name: "Shared".into(),
             enabled: true,
         },
+        ModOrGroup::Individual(a),
+        ModOrGroup::Individual(b),
     ];
     test.app
         .state
@@ -34,7 +34,7 @@ fn remove_first(test: &mut TestApp) {
         Edit::DeleteEntry(ListTarget {
             profile: "default".into(),
             group: None,
-            index: 0,
+            index: 1,
         }),
         true,
     );
@@ -143,7 +143,7 @@ fn history_tracks_mod_settings_and_toolbar_undo_redo_without_changing_files() {
     let mut test = fixture();
     let before = (**test.app.state.mod_data).clone();
     if let ModOrGroup::Individual(config) =
-        &mut test.app.state.mod_data.get_active_profile_mut().mods[0]
+        &mut test.app.state.mod_data.get_active_profile_mut().mods[1]
     {
         config.enabled = false;
         config.priority = 42;
@@ -151,6 +151,7 @@ fn history_tracks_mod_settings_and_toolbar_undo_redo_without_changing_files() {
     }
     test.app.save_mod_data("Edit mod settings");
     let after = (**test.app.state.mod_data).clone();
+    assert_ne!(after, before);
     test.full_button("Undo", false);
     assert_eq!(**test.app.state.mod_data, before);
     test.full_button("Redo", false);
