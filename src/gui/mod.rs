@@ -1,3 +1,4 @@
+mod app_update;
 mod diagnostics;
 mod drag_drop;
 mod editing;
@@ -35,7 +36,7 @@ fn dismiss_popups(ctx: &egui::Context) {
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::{Deref, RangeInclusive};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 use std::{
     collections::{HashMap, HashSet},
     ops::DerefMut,
@@ -43,7 +44,6 @@ use std::{
 };
 
 use eframe::egui::RichText;
-use eframe::epaint::{Pos2, Vec2};
 use eframe::{
     egui::{FontSelection, Layout, TextFormat, Ui},
     emath::{Align, Align2},
@@ -160,7 +160,7 @@ pub struct App {
     resolve_mod_rid: Option<MessageHandle<()>>,
     integrate_rid: Option<MessageHandle<HashMap<ModSpecification, SpecFetchProgress>>>,
     update_rid: Option<MessageHandle<()>>,
-    check_updates_rid: Option<MessageHandle<()>>,
+    check_updates_rid: Option<MessageHandle<bool>>,
     has_run_init: bool,
     request_counter: RequestCounter,
     window_provider_parameters: Option<WindowProviderParameters>,
@@ -176,7 +176,10 @@ pub struct App {
     refresh_progress: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     refresh_total: usize,
     available_update: Option<GitHubRelease>,
-    show_update_time: Option<SystemTime>,
+    show_app_update: bool,
+    update_dismissed: bool,
+    app_update_status: String,
+    self_update_control: Option<std::sync::Arc<crate::app_update::Control>>,
     open_profiles: HashSet<String>,
     lint_rid: Option<MessageHandle<()>>,
     lint_report_window: Option<WindowLintReport>,
@@ -185,6 +188,8 @@ pub struct App {
     lint_options: LintOptions,
     cache: CommonMarkCache,
     needs_restart: bool,
+    close_after_update: bool,
+    restart_arguments: Vec<std::ffi::OsString>,
     self_update_rid: Option<MessageHandle<SelfUpdateProgress>>,
     original_exe_path: Option<PathBuf>,
     problematic_mod_id: Option<u32>,
@@ -293,7 +298,10 @@ impl App {
             refresh_progress: Default::default(),
             refresh_total: 0,
             available_update: None,
-            show_update_time: None,
+            show_app_update: false,
+            update_dismissed: false,
+            app_update_status: String::new(),
+            self_update_control: None,
             open_profiles: Default::default(),
             lint_rid: None,
             lint_report_window: None,
@@ -302,6 +310,8 @@ impl App {
             lint_options: LintOptions::default(),
             cache: Default::default(),
             needs_restart: false,
+            close_after_update: false,
+            restart_arguments: std::env::args_os().skip(1).collect(),
             self_update_rid: None,
             original_exe_path: None,
             problematic_mod_id: None,
@@ -385,92 +395,6 @@ impl App {
         string
     }
 
-    fn show_update_window(&mut self, ctx: &egui::Context) {
-        if let (Some(update), Some(update_time)) =
-            (self.available_update.as_ref(), self.show_update_time)
-        {
-            let now = SystemTime::now();
-            let wait_time = Duration::from_secs(10);
-            egui::Area::new("available-update-overlay".into())
-                .movable(false)
-                .fixed_pos(Pos2::ZERO)
-                .order(egui::Order::Background)
-                .show(ctx, |ui| {
-                    egui::Frame::NONE
-                        .fill(Color32::from_rgba_unmultiplied(0, 0, 0, 127))
-                        .show(ui, |ui| {
-                            ui.allocate_space(ui.available_size());
-                        })
-                });
-            if let Some(MessageHandle { state, .. }) = &self.self_update_rid {
-                egui::Window::new("Update progress")
-                    .collapsible(false)
-                    .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
-                    .resizable(false)
-                    .show(ctx, |ui| {
-                        ui.with_layout(egui::Layout::top_down_justified(Align::Center), |ui| {
-                            match state {
-                                SelfUpdateProgress::Pending => {
-                                    ui.add(egui::ProgressBar::new(0.0).show_percentage());
-                                }
-                                SelfUpdateProgress::Progress { progress, size } => {
-                                    ui.add(
-                                        egui::ProgressBar::new(*progress as f32 / *size as f32)
-                                            .show_percentage(),
-                                    );
-                                }
-                                SelfUpdateProgress::Complete => {
-                                    ui.add(egui::ProgressBar::new(1.0).show_percentage());
-                                    ui.label(
-                                        egui::RichText::new("Update successful.")
-                                            .color(Color32::LIGHT_GREEN),
-                                    );
-
-                                    if ui.button("Restart").clicked() {
-                                        self.needs_restart = true;
-                                    }
-                                }
-                            };
-                        });
-                    });
-            } else {
-                egui::Window::new(format!("Update available: {}", update.tag_name))
-                    .collapsible(false)
-                    .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
-                    .resizable(false)
-                    .show(ctx, |ui| {
-                        CommonMarkViewer::new().max_image_width(Some(512)).show(
-                            ui,
-                            &mut self.cache,
-                            &update.body,
-                        );
-                        ui.with_layout(egui::Layout::right_to_left(Align::TOP), |ui| {
-                            if ui
-                                .add(egui::Button::new("Install update"))
-                                .on_hover_text("Download and install the update.")
-                                .clicked()
-                            {
-                                self.self_update_rid = Some(message::SelfUpdate::send(
-                                    &mut self.request_counter,
-                                    self.tx.clone(),
-                                    ctx.clone(),
-                                ));
-                            }
-
-                            let elapsed = now.duration_since(update_time).unwrap_or_default();
-                            if elapsed > wait_time {
-                                if ui.button("Close").clicked() {
-                                    self.show_update_time = None;
-                                }
-                            } else {
-                                ui.spinner();
-                            }
-                        });
-                    });
-            }
-        }
-    }
-
     fn show_profile_windows(&mut self, ctx: &egui::Context) {
         let mut to_remove = vec![];
         for profile in &self.open_profiles.clone() {
@@ -505,18 +429,27 @@ impl eframe::App for App {
             dismiss_popups(ctx);
         }
         if self.needs_restart
-            && let Some(original_exe_path) = &self.original_exe_path
+            && let Some(original_exe_path) = self.original_exe_path.clone()
         {
             debug!("needs restart");
             self.needs_restart = false;
 
-            debug!("restarting...");
-            let _child = std::process::Command::new(original_exe_path)
-                .spawn()
-                .unwrap();
-            debug!("created child process");
+            if !self.report_save(self.state.config.save()) {
+                return;
+            }
 
-            std::process::exit(0);
+            debug!("restarting...");
+            match std::process::Command::new(original_exe_path)
+                .args(&self.restart_arguments)
+                .spawn()
+            {
+                Ok(_) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                Err(error) => {
+                    self.last_action = Some(LastAction::failure(format!(
+                        "Could not restart MINT: {error}. Close and reopen the application manually."
+                    )))
+                }
+            }
         }
 
         // do some init things that depend on ctx so cannot be done earlier
@@ -526,12 +459,23 @@ impl eframe::App for App {
             let theme = GuiTheme::into_egui_theme(self.state.config.gui_theme);
             ctx.memory_mut(|m| m.options.theme_preference = theme);
 
-            message::CheckUpdates::send(self, ctx);
+            message::CheckUpdates::send(self, ctx, false);
         }
 
         // message handling
         while let Ok(msg) = self.rx.try_recv() {
             msg.handle(self);
+        }
+
+        if ctx.input(|input| input.viewport().close_requested()) && self.self_update_rid.is_some() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.close_after_update = true;
+            if let Some(control) = &self.self_update_control {
+                control.cancel();
+            }
+        }
+        if self.close_after_update && self.self_update_rid.is_none() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
 
         // begin draw
@@ -729,8 +673,7 @@ impl eframe::App for App {
                     )
                     .clicked()
                 {
-                    ui.ctx()
-                        .open_url(egui::OpenUrl::new_tab(&available_update.html_url));
+                    self.show_app_update = true;
                 }
             });
         });
@@ -895,7 +838,8 @@ impl eframe::App for App {
             // must access memory outside of input lock to prevent deadlock
             let is_anything_focused = ctx.memory(|m| m.focused().is_some());
             ctx.input(|i| {
-                if self.delete_confirmation.is_some() || self.editing_busy() {
+                if self.delete_confirmation.is_some() || self.editing_busy() || self.show_app_update
+                {
                     return;
                 }
                 if !i.raw.dropped_files.is_empty()
@@ -940,7 +884,9 @@ impl eframe::App for App {
             });
         });
         self.show_delete_confirmation(ctx);
-        self.show_notifications(ctx);
+        if !self.show_app_update {
+            self.show_notifications(ctx);
+        }
         if let Some(mut window) = self.log_window.take()
             && window.show(ctx)
         {
@@ -1018,9 +964,4 @@ impl From<FetchProgress> for SpecFetchProgress {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum SelfUpdateProgress {
-    Pending,
-    Progress { progress: u64, size: u64 },
-    Complete,
-}
+use crate::app_update::Progress as SelfUpdateProgress;

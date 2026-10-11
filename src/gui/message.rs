@@ -1,10 +1,8 @@
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::SystemTime;
 use std::{collections::HashMap, sync::Arc};
 
 use futures::FutureExt;
-use snafu::prelude::*;
 use tokio::{
     sync::mpsc::{self, Sender},
     task::JoinHandle,
@@ -57,6 +55,14 @@ impl Message {
     pub fn handle(self, app: &mut App) {
         match self {
             Self::OperationFailed(rid) => {
+                if app.check_updates_rid.as_ref().is_some_and(|h| h.rid == rid) {
+                    app.app_update_status = "Could not check for updates. Please try again.".into();
+                }
+                if app.self_update_rid.as_ref().is_some_and(|h| h.rid == rid) {
+                    app.self_update_control = None;
+                    app.app_update_status =
+                        "Update stopped unexpectedly. See Details and retry.".into();
+                }
                 fn clear<S>(handle: &mut Option<MessageHandle<S>>, rid: RequestID) -> bool {
                     if handle.as_ref().is_some_and(|handle| handle.rid == rid) {
                         *handle = None;
@@ -413,46 +419,61 @@ pub struct CheckUpdates {
 }
 
 impl CheckUpdates {
-    pub fn send(app: &mut App, ctx: &egui::Context) {
+    pub fn send(app: &mut App, ctx: &egui::Context, manual: bool) {
+        if app.check_updates_rid.is_some() {
+            return;
+        }
         let rid = app.request_counter.next();
         let tx = app.tx.clone();
         let ctx = ctx.clone();
-
+        app.app_update_status = "Checking for updates...".into();
         let handle = spawn_reported(rid, ctx.clone(), tx.clone(), async move {
-            tx.send(Message::CheckUpdates(Self {
-                rid,
-                result: mint_lib::update::get_latest_release().await,
-            }))
-            .await
-            .unwrap();
+            let result = mint_lib::update::get_latest_release().await;
+            let _ = tx.send(Message::CheckUpdates(Self { rid, result })).await;
             ctx.request_repaint();
         });
         app.check_updates_rid = Some(MessageHandle {
             rid,
             handle,
-            state: (),
+            state: manual,
             cancellation: None,
         });
     }
 
     fn receive(self, app: &mut App) {
-        if Some(self.rid) == app.check_updates_rid.as_ref().map(|r| r.rid) {
-            app.check_updates_rid = None;
-            match self.result {
-                Ok(release) => {
-                    if let (Ok(version), Some(Ok(release_version))) = (
-                        semver::Version::parse(env!("CARGO_PKG_VERSION")),
-                        release
-                            .tag_name
-                            .strip_prefix('v')
-                            .map(semver::Version::parse),
-                    ) && release_version > version
-                    {
-                        app.available_update = Some(release);
-                        app.show_update_time = Some(SystemTime::now());
+        if !app
+            .check_updates_rid
+            .as_ref()
+            .is_some_and(|r| r.rid == self.rid)
+        {
+            return;
+        }
+        let manual = app.check_updates_rid.take().unwrap().state;
+        match self.result {
+            Ok(release) => match semver::Version::parse(release.tag_name.trim_start_matches('v')) {
+                Ok(version)
+                    if version > semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap() =>
+                {
+                    app.app_update_status = format!("Update available: {}", release.tag_name);
+                    app.available_update = Some(release);
+                    if manual || !app.update_dismissed {
+                        app.show_app_update = true;
                     }
                 }
-                Err(e) => tracing::warn!("failed to fetch update {e}"),
+                Ok(_) => {
+                    app.available_update = None;
+                    app.app_update_status = "You are up to date.".into();
+                }
+                Err(_) => {
+                    app.app_update_status =
+                        "Could not check for updates: invalid release version. Try again later."
+                            .into()
+                }
+            },
+            Err(error) => {
+                tracing::warn!("Application update check failed: {error}");
+                app.app_update_status =
+                    "Could not check for updates. Check your connection and try again.".into();
             }
         }
     }
@@ -668,7 +689,7 @@ async fn resolve_async_ordered(
 #[derive(Debug)]
 pub struct SelfUpdate {
     rid: RequestID,
-    result: Result<PathBuf, IntegrationError>,
+    result: anyhow::Result<Option<PathBuf>>,
 }
 
 impl SelfUpdate {
@@ -676,37 +697,71 @@ impl SelfUpdate {
         rc: &mut RequestCounter,
         tx: Sender<Message>,
         ctx: egui::Context,
+        tag: &str,
+        control: Arc<crate::app_update::Control>,
     ) -> MessageHandle<SelfUpdateProgress> {
         let rid = rc.next();
+        let url = mint_lib::update::version_download_url(tag, crate::app_update::asset_name());
+        #[cfg(test)]
+        let url = std::env::var("MINT_NATIVE_UPDATE_URL").unwrap_or(url);
         MessageHandle {
             rid,
             handle: spawn_reported(rid, ctx.clone(), tx.clone(), async move {
-                let result = self_update_async(ctx.clone(), rid, tx.clone()).await;
-                tx.send(Message::SelfUpdate(SelfUpdate { rid, result }))
-                    .await
-                    .unwrap();
+                let progress_tx = tx.clone();
+                let progress_ctx = ctx.clone();
+                let result = crate::app_update::install(url, control, move |progress| {
+                    let _ = progress_tx.try_send(Message::FetchSelfUpdateProgress(
+                        FetchSelfUpdateProgress { rid, progress },
+                    ));
+                    progress_ctx.request_repaint();
+                })
+                .await;
+                let _ = tx
+                    .send(Message::SelfUpdate(SelfUpdate { rid, result }))
+                    .await;
                 ctx.request_repaint();
             }),
-            state: SelfUpdateProgress::Pending,
+            state: SelfUpdateProgress::Downloading {
+                downloaded: 0,
+                total: None,
+            },
             cancellation: None,
         }
     }
 
     fn receive(self, app: &mut App) {
-        if Some(self.rid) == app.self_update_rid.as_ref().map(|r| r.rid) {
-            match self.result {
-                Ok(original_exe_path) => {
-                    info!("self update complete");
-                    app.original_exe_path = Some(original_exe_path);
-                    app.last_action = Some(LastAction::success("self update complete".to_string()));
-                }
-                Err(e) => {
-                    error!("self update failed");
-                    error!("{:#?}", e);
-                    app.self_update_rid = None;
-                    app.last_action =
-                        Some(LastAction::failure(super::diagnostics::error_details(&e)));
-                }
+        if !app
+            .self_update_rid
+            .as_ref()
+            .is_some_and(|r| r.rid == self.rid)
+        {
+            return;
+        }
+        match self.result {
+            Ok(Some(path)) => {
+                tracing::info!("Application update installed; restart required");
+                app.original_exe_path = Some(path);
+                app.self_update_rid = None;
+                app.self_update_control = None;
+                app.app_update_status = "Update installed. Restart MINT to use it.".into();
+                app.last_action = Some(LastAction::success(
+                    "Application update installed. Restart MINT to use it.".into(),
+                ));
+            }
+            Ok(None) => {
+                app.self_update_rid = None;
+                app.self_update_control = None;
+                app.app_update_status = "Update cancelled. The application was not changed.".into();
+            }
+            Err(error) => {
+                tracing::error!("Application update failed: {error:#}");
+                app.self_update_rid = None;
+                app.self_update_control = None;
+                app.app_update_status =
+                    "Update failed. See Details for the cause and retry instructions.".into();
+                app.last_action = Some(LastAction::failure(format!(
+                    "Application update failed: {error:#}"
+                )));
             }
         }
     }
@@ -726,133 +781,4 @@ impl FetchSelfUpdateProgress {
             *state = self.progress;
         }
     }
-}
-
-async fn self_update_async(
-    ctx: egui::Context,
-    rid: RequestID,
-    message_tx: Sender<Message>,
-) -> Result<PathBuf, IntegrationError> {
-    use futures::stream::TryStreamExt;
-    use tokio::io::AsyncWriteExt;
-
-    let (tx, mut rx) = mpsc::channel::<SelfUpdateProgress>(1);
-
-    tokio::spawn(async move {
-        while let Some(progress) = rx.recv().await {
-            message_tx
-                .send(Message::FetchSelfUpdateProgress(FetchSelfUpdateProgress {
-                    rid,
-                    progress,
-                }))
-                .await
-                .unwrap();
-            ctx.request_repaint();
-        }
-    });
-
-    let client = reqwest::Client::new();
-
-    let asset_name = if cfg!(target_os = "windows") {
-        "mint-x86_64-pc-windows-msvc.zip"
-    } else if cfg!(target_os = "linux") {
-        "mint-x86_64-unknown-linux-gnu.zip"
-    } else {
-        unimplemented!("unsupported platform");
-    };
-
-    info!("downloading update");
-
-    let response = client
-        .get(mint_lib::update::release_download_url(asset_name))
-        .send()
-        .await
-        .map_err(Into::into)
-        .with_context(|_| SelfUpdateFailedSnafu)?
-        .error_for_status()
-        .map_err(Into::into)
-        .with_context(|_| SelfUpdateFailedSnafu)?;
-    let size = response.content_length();
-    debug!(?response);
-    debug!(?size);
-
-    let tmp_dir = tempfile::Builder::new()
-        .prefix("self_update")
-        .tempdir_in(std::env::current_dir()?)?;
-    let tmp_archive_path = tmp_dir.path().join(asset_name);
-    let mut tmp_archive = tokio::fs::File::create(&tmp_archive_path)
-        .await
-        .map_err(Into::into)
-        .with_context(|_| SelfUpdateFailedSnafu)?;
-    let mut stream = response.bytes_stream();
-
-    let mut total_bytes_written = 0;
-    while let Some(bytes) = stream
-        .try_next()
-        .await
-        .map_err(Into::into)
-        .with_context(|_| SelfUpdateFailedSnafu)?
-    {
-        let bytes_written = tmp_archive.write(&bytes).await?;
-        total_bytes_written += bytes_written;
-        if let Some(size) = size {
-            tx.send(SelfUpdateProgress::Progress {
-                progress: total_bytes_written as u64,
-                size,
-            })
-            .await
-            .unwrap();
-        }
-    }
-
-    debug!(?tmp_dir);
-    debug!(?tmp_archive_path);
-    debug!(?tmp_archive);
-
-    let original_exe_path =
-        tokio::task::spawn_blocking(move || -> Result<PathBuf, IntegrationError> {
-            let bin_name = if cfg!(target_os = "windows") {
-                "mint.exe"
-            } else if cfg!(target_os = "linux") {
-                "mint"
-            } else {
-                unimplemented!("unsupported platform");
-            };
-
-            info!("extracting downloaded update archive");
-            self_update::Extract::from_source(&tmp_archive_path)
-                .archive(self_update::ArchiveKind::Zip)
-                .extract_file(tmp_dir.path(), bin_name)
-                .map_err(Into::into)
-                .with_context(|_| SelfUpdateFailedSnafu)?;
-
-            info!("replacing old executable with new executable");
-            let tmp_file = tmp_dir.path().join("replacement_tmp");
-            let bin_path = tmp_dir.path().join(bin_name);
-
-            let original_exe_path = std::env::current_exe()?;
-
-            self_update::Move::from_source(&bin_path)
-                .replace_using_temp(&tmp_file)
-                .to_dest(&original_exe_path)
-                .map_err(Into::into)
-                .with_context(|_| SelfUpdateFailedSnafu)?;
-
-            #[cfg(target_os = "linux")]
-            {
-                info!("setting executable permission on new executable");
-                use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(&original_exe_path, std::fs::Permissions::from_mode(0o755))
-                    .unwrap();
-            }
-
-            Ok(original_exe_path)
-        })
-        .await??;
-
-    tx.send(SelfUpdateProgress::Complete).await.unwrap();
-
-    info!("update successful");
-
-    Ok(original_exe_path)
 }

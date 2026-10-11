@@ -68,7 +68,10 @@ impl App {
     }
 
     pub(super) fn history_available(&self) -> bool {
-        !self.editing_busy() && self.self_update_rid.is_none() && self.delete_confirmation.is_none()
+        !self.editing_busy()
+            && self.self_update_rid.is_none()
+            && self.delete_confirmation.is_none()
+            && !self.show_app_update
     }
 
     pub(super) fn restore_history(&mut self, redo: bool, expected: Option<u64>) {

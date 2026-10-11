@@ -1,3 +1,4 @@
+pub mod app_update;
 pub mod gui;
 pub mod integrate;
 pub mod mod_lints;

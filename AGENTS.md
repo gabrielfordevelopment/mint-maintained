@@ -16,6 +16,7 @@
 | `src/main.rs`, `src/lib.rs` | CLI, startup, application directories, shared application helpers |
 | `src/gui/mod.rs`, `src/gui/message.rs` | egui application shell, asynchronous operation dispatch and results |
 | `src/gui/updates.rs`, `src/gui/installation.rs` | Scoped update controls, structured refresh reports, footer status and asynchronous installation comparison |
+| `src/app_update.rs`, `src/gui/app_update.rs` | Application download/replacement, cancellation, release dialog and restart flow |
 | `src/gui/mod_list.rs`, `sorting.rs`, `settings.rs`, `lint.rs` | Mod rows, display ordering, settings/provider dialogs, lint selection and reports |
 | `src/gui/editing.rs`, `groups.rs`, `src/state/edits.rs` | Deletion confirmation, shared-group management, validated profile/group operations |
 | `src/gui/drag_drop.rs`, `src/gui/log_window.rs` | Drag targets and feedback; bounded asynchronous log reader and native log viewport |
@@ -35,6 +36,7 @@
 ## Working agreements
 
 - Reply in the user's language. Write code, comments, instructions, technical documentation, branch names, commit messages, and PR text in English.
+- Keep repository files and published text appropriate for their audience: changelogs and release notes for users, PR descriptions for reviewers, and technical guidance for contributors. Do not include personal data, private machine paths, conversation history, or instructions addressed to the requesting user (such as where they should click after CI finishes). Keep personal handoff and publication steps in chat, not in repository content or PR/release descriptions.
 - Inspect the affected implementation, callers, tests, and integration points before editing. Extend the existing owner instead of duplicating behavior in another layer.
 - Preserve unrelated changes and user-created commits. Keep changes within the requested scope; do not mix UI polish with unrelated dependency upgrades or cache refactors.
 - Treat tests as behavior contracts. Add meaningful regression coverage for logic fixes; do not weaken tests to hide production failures.
@@ -74,7 +76,7 @@
 - Integration and uninstall write into the selected game installation. Use fixtures for ordinary tests; exercise a real installation only within the user's authorized testing scope.
 - Changes to pak contents, serialized metadata in `mint_lib`, and readers in `hook` must stay compatible. Consider Steam and Microsoft Store paths and game-version-dependent signatures.
 - Do not equate passing host tests with successful in-game testing. Report hook/runtime testing separately and name any untested platform.
-- Keep update URLs derived from this repository's metadata. Release archive names and executable paths must match `mint_lib/src/update.rs` and `src/gui/message.rs` expectations.
+- Keep update URLs derived from this repository's metadata. Release archive names and executable paths must match `mint_lib/src/update.rs` and `src/app_update.rs` expectations. Download the release shown to the user, close the completed archive before extraction, and preserve a runnable application if replacement fails. Keep cancellation outside the executable replacement phase; never test self-updates against a personal installation.
 - The application version is `[workspace.package].version` in `Cargo.toml`; all workspace packages inherit it. Update it only during authorized release preparation, refresh the workspace entries in `Cargo.lock` without upgrading dependencies, and update `CHANGELOG.md` on a task branch through a PR to `develop`. See the [release procedure](.agents/skills/mint-maintained-git-workflow/SKILL.md); the manual workflow reads the committed version and never bumps it.
 - Preserve existing license notices and provenance. For new dependencies, verify necessity, license, enabled features, and relevant transitive risks. Keep `Cargo.lock` and affected notices consistent; avoid unrelated lockfile churn.
 - `THIRD_PARTY_NOTICES.md` and the icon license files are already embedded in Settings. Update those owners instead of adding a competing notice system.
