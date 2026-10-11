@@ -181,10 +181,18 @@ pub(super) fn finish(
         let index = profile.insertion_index(destination.index, payload.is_group);
         if index != destination.index {
             destination.index = index;
-            let first_group = rows.iter().find(|row| {
-                row.parent_index.is_none() && row.target.index == profile.group_start()
-            })?;
-            rect = first_group.rect;
+            if let Some(first_mod) = rows.iter().find(|row| {
+                row.parent_index.is_none() && row.target.index == profile.standalone_start()
+            }) {
+                rect = first_mod.rect;
+            } else {
+                let bottom = rows
+                    .iter()
+                    .map(|row| row.rect.bottom())
+                    .fold(ui.max_rect().top(), f32::max);
+                rect.min.y = bottom;
+                rect.max.y = bottom;
+            }
             rect.min.x = ui.max_rect().left();
             after = false;
         }

@@ -4,6 +4,7 @@ pub mod modio;
 #[macro_use]
 pub mod cache;
 pub mod mod_store;
+pub mod refresh;
 
 use snafu::prelude::*;
 use tokio::sync::mpsc::Sender;
@@ -62,6 +63,16 @@ pub trait ModProvider: Send + Sync {
         tx: Option<Sender<FetchProgress>>,
     ) -> Result<PathBuf, ProviderError>;
     async fn update_cache(&self, cache: ProviderCache) -> Result<(), ProviderError>;
+    fn cached_specs(&self, _cache: ProviderCache) -> Vec<ModSpecification> {
+        Vec::new()
+    }
+    async fn refresh_mod(
+        &self,
+        spec: &ModSpecification,
+        cache: ProviderCache,
+    ) -> Result<(), ProviderError> {
+        self.resolve_mod(spec, true, cache).await.map(|_| ())
+    }
     /// Check if provider is configured correctly
     async fn check(&self) -> Result<(), ProviderError>;
     fn get_mod_info(&self, spec: &ModSpecification, cache: ProviderCache) -> Option<ModInfo>;

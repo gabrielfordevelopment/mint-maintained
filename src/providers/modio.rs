@@ -15,6 +15,7 @@ use tracing::*;
 
 use crate::providers::*;
 
+pub mod rate_limit;
 #[cfg(test)]
 mod reliability_tests;
 
@@ -172,9 +173,18 @@ impl ModioFile {
     }
 }
 
-#[derive(Default)]
 struct LoggingMiddleware {
     requests: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    gate: Arc<rate_limit::RequestGate>,
+}
+
+impl Default for LoggingMiddleware {
+    fn default() -> Self {
+        Self {
+            requests: Default::default(),
+            gate: rate_limit::shared(),
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -186,6 +196,7 @@ impl Middleware for LoggingMiddleware {
         next: Next<'_>,
     ) -> reqwest_middleware::Result<Response> {
         for attempt in 0..3 {
+            self.gate.wait().await;
             info!(
                 "request started {} {:?}",
                 self.requests
@@ -198,17 +209,16 @@ impl Middleware for LoggingMiddleware {
             let res = next.clone().run(request, extensions).await;
             if let Ok(res) = &res
                 && matches!(res.status().as_u16(), 429 | 503)
-                && attempt < 2
-                && let Some(retry) = res.headers().get("retry-after")
-                && let Some(seconds) = retry
-                    .to_str()
-                    .ok()
-                    .and_then(|value| value.parse::<u64>().ok())
-                && (1..=30).contains(&seconds)
             {
-                info!("retrying after {seconds} seconds");
-                tokio::time::sleep(tokio::time::Duration::from_secs(seconds)).await;
-                continue;
+                let delay = rate_limit::retry_delay(res.headers().get("retry-after"));
+                self.gate.defer(delay);
+                if attempt < 2 {
+                    info!(
+                        "mod.io temporarily unavailable; retrying after {} seconds",
+                        delay.as_secs()
+                    );
+                    continue;
+                }
             }
             return res;
         }
@@ -839,6 +849,78 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
         }
     }
 
+    fn cached_specs(&self, cache: ProviderCache) -> Vec<ModSpecification> {
+        cache
+            .read()
+            .unwrap()
+            .get::<ModioCache>(MODIO_PROVIDER_ID)
+            .map(|c| {
+                c.mods
+                    .iter()
+                    .map(|(id, m)| format_spec(&m.name_id, *id, None))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    async fn refresh_mod(
+        &self,
+        spec: &ModSpecification,
+        cache: ProviderCache,
+    ) -> Result<(), ProviderError> {
+        let parsed = parse_url(&spec.url)?;
+        let id = match parsed.mod_id {
+            Some(id) => id,
+            None => {
+                let found = self.modio.fetch_mods_by_name(parsed.name_id).await?;
+                match found.as_slice() {
+                    [m] => m.id,
+                    [] => {
+                        return Err(ProviderError::NoModsForNameId {
+                            name_id: parsed.name_id.into(),
+                        });
+                    }
+                    _ => {
+                        return Err(ProviderError::AmbiguousModNameId {
+                            name_id: parsed.name_id.into(),
+                        });
+                    }
+                }
+            }
+        };
+        let mod_ = self.modio.fetch_mod(spec.url.clone(), id).await?;
+        let dependencies = self.modio.fetch_dependencies(spec.url.clone(), id).await?;
+        let missing = {
+            let lock = cache.read().unwrap();
+            let c = lock.get::<ModioCache>(MODIO_PROVIDER_ID);
+            dependencies
+                .iter()
+                .copied()
+                .filter(|id| c.is_none_or(|c| !c.mods.contains_key(id)))
+                .collect::<Vec<_>>()
+        };
+        let mut dependency_metadata = Vec::new();
+        if !missing.is_empty() {
+            for dependency in self.modio.fetch_mods_by_ids(missing).await? {
+                let metadata = self
+                    .modio
+                    .fetch_files(dependency.profile_url.to_string(), dependency.id)
+                    .await?;
+                dependency_metadata.push((dependency.id, metadata));
+            }
+        }
+        let mut lock = cache.write().unwrap();
+        let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
+        for (id, metadata) in dependency_metadata {
+            c.mod_id_map.insert(metadata.name_id.clone(), id);
+            c.mods.insert(id, metadata);
+        }
+        c.mod_id_map.insert(mod_.name_id.clone(), id);
+        c.mods.insert(id, mod_);
+        c.dependencies.insert(id, dependencies);
+        Ok(())
+    }
+
     async fn update_cache(&self, cache: ProviderCache) -> Result<(), ProviderError> {
         use futures::stream::{self, StreamExt};
 
@@ -961,7 +1043,7 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
         let modfile_id = if let Some(modfile_id) = parsed.modfile_id {
             modfile_id
         } else {
-            mod_.modfiles.last().map(|f| f.id)?
+            mod_.latest_modfile?
         };
 
         let deps = prov

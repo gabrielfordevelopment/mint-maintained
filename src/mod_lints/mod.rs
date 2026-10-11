@@ -270,6 +270,35 @@ pub struct LintReport {
     pub unmodified_game_assets_mods: Option<BTreeMap<ModSpecification, BTreeSet<String>>>,
 }
 
+impl LintReport {
+    pub fn check_counts(&self) -> (usize, usize) {
+        let outcomes = [
+            self.conflicting_mods.as_ref().map(|v| !v.is_empty()),
+            self.asset_register_bin_mods.as_ref().map(|v| !v.is_empty()),
+            self.shader_file_mods.as_ref().map(|v| !v.is_empty()),
+            self.outdated_pak_version_mods
+                .as_ref()
+                .map(|v| !v.is_empty()),
+            self.empty_archive_mods.as_ref().map(|v| !v.is_empty()),
+            self.archive_with_only_non_pak_files_mods
+                .as_ref()
+                .map(|v| !v.is_empty()),
+            self.archive_with_multiple_paks_mods
+                .as_ref()
+                .map(|v| !v.is_empty()),
+            self.non_asset_file_mods.as_ref().map(|v| !v.is_empty()),
+            self.split_asset_pairs_mods.as_ref().map(|v| !v.is_empty()),
+            self.unmodified_game_assets_mods
+                .as_ref()
+                .map(|v| !v.is_empty()),
+        ];
+        (
+            outcomes.iter().flatten().count(),
+            outcomes.iter().flatten().filter(|v| **v).count(),
+        )
+    }
+}
+
 pub fn run_lints(
     enabled_lints: &BTreeSet<LintId>,
     mods: IndexSet<(ModSpecification, PathBuf)>,

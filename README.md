@@ -25,7 +25,7 @@ fixes from mintfixed:
 externally of the game. This enables more stable mod usage as well as offline mod usage. Works for
 both Steam and Microsoft Store versions.
 
-![MINT Maintained 0.4.0 in light mode with demo mods and multilingual groups](docs/images/mint-0.4.0-overview-light.png)
+![MINT Maintained 0.5.0 in light mode with groups above demo mods and the two-row footer](docs/images/mint-0.5.0-overview-light.png)
 
 Mods are added via URL to a .pak or .zip containing a .pak. Mods can also be pulled from mod.io.
 Examples:
@@ -66,7 +66,7 @@ We need to provide the tool with the path to `FSD-WindowsNoEditor.pak` and a mod
 you want to use mod.io mods. These can be configured in the settings menu (cogwheel located in the
 bottom toolbar).
 
-![MINT Maintained 0.4.0 settings in light mode using isolated demo data](docs/images/mint-0.4.0-settings-light.png)
+![MINT Maintained 0.5.0 settings in light mode using isolated demo data](docs/images/mint-0.5.0-settings-light.png)
 
 #### Locating the DRG `FSD-WindowsNoEditor.pak`
 
@@ -115,14 +115,27 @@ local `.pak` in the same "Add mods..." field.
 
 ### Sorting mods
 
+New and explicitly arranged profiles show groups first, followed by standalone mods.
+For older layouts, use **Arrange groups** to confirm the change: moving the sections
+can affect mod load order. Order within each section and group contents are preserved.
+
 Sorting changes the displayed order only; selecting Manual restores the stored order.
 Groups stay in place. Mods are sorted within each group and within each contiguous
 run of individual mods between groups.
 
-### Updating Cache
+### Checking for mod updates
 
-The versioned mod.io mods are *cached*. If you want to update to the latest version of your mods,
-you'll need to press the "Update cache" button.
+mod.io version information is cached. Use **Check updates** to refresh the current profile or all
+cached mods, or right-click a mod and choose **Check for updates**. Failed checks can be retried
+from **Details** without repeating successful checks. A rate-limit wait can be cancelled and resumed.
+
+Checking does not install anything. Mods set to **latest** use the newest known version the next
+time you click **Install mods**; pinned versions stay selected until you change them. Row indicators
+and footer status distinguish available versions from unapplied profile changes. Older installations
+show an unknown tracking state until the next successful installation.
+
+**Check mod files** checks for file conflicts and common packaging problems. It may download mod
+files, but it does not install them or guarantee that they work together in the game.
 
 ### Installing/uninstalling mods
 

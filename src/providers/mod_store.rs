@@ -8,8 +8,8 @@ use crate::providers::*;
 use crate::state::config::ConfigWrapper;
 
 pub struct ModStore {
-    providers: Providers,
-    cache: ProviderCache,
+    pub(super) providers: Providers,
+    pub(super) cache: ProviderCache,
     blob_cache: BlobCache,
 }
 

@@ -17,7 +17,7 @@ impl App {
             .is_some_and(|p| p.has_mixed_order());
         if mixed_order {
             ui.horizontal_wrapped(|ui| {
-                ui.label("Arrange this profile to keep standalone mods before groups.");
+                ui.label("Arrange this profile to keep groups before standalone mods.");
                 if ui.button("Arrange groups…").clicked() {
                     self.request_edit(
                         crate::state::edits::Edit::ArrangeProfile(profile.into()),
@@ -66,6 +66,7 @@ impl App {
             edit: Option<Edit>,
             open_group: Option<String>,
             copied_link: bool,
+            check_update: Option<ModSpecification>,
             rows: Vec<drag_drop::DropRow>,
             header: Option<(egui::Rect, String, usize)>,
         }
@@ -77,6 +78,7 @@ impl App {
             edit: None,
             open_group: None,
             copied_link: false,
+            check_update: None,
             rows: Vec::new(),
             header: None,
         };
@@ -325,6 +327,29 @@ impl App {
                             }
                         });
                     named_combobox::close_on_outside_press(ui, &dropdown.response);
+                    let selected = info.resolution.url.0.as_str();
+                    let latest = self.state.store.get_mod_info(&info.spec);
+                    let newer = latest
+                        .as_ref()
+                        .is_some_and(|m| m.resolution.url.0 != selected);
+                    let pending = self.installation_status.rows.get(&mc.spec.url);
+                    let hint = if newer {
+                        Some(
+                            "Latest differs from your pinned version. Choose latest, then click Install mods to use it.",
+                        )
+                    } else if pending.is_some()
+                        && info.provider == "modio"
+                        && !self.state.store.is_pinned(&mc.spec)
+                    {
+                        Some("Latest version is not installed. Click Install mods to apply it.")
+                    } else {
+                        pending.map(String::as_str)
+                    };
+                    if let Some(hint) = hint {
+                        icons::show(ui, Icon::Update).on_hover_text(hint);
+                    } else {
+                        ui.allocate_space(egui::vec2(icons::SIZE, icons::SIZE));
+                    }
 
                     ui.scope(|ui| {
                         ui.style_mut().spacing.interact_size.x = 30.;
@@ -442,6 +467,10 @@ impl App {
 
                     let res = ui.hyperlink_to(search.job, &mc.spec.url);
                     res.context_menu(|ui| {
+                        if info.provider == "modio" && ui.button("Check for updates").clicked() {
+                            ctx.check_update = Some(mc.spec.clone());
+                            ui.close_menu();
+                        }
                         if let Some(action) = editing::mod_context_menu(
                             ui,
                             &group_names,
@@ -477,6 +506,12 @@ impl App {
 
                     let res = ui.hyperlink_to(search.job, &mc.spec.url);
                     res.context_menu(|ui| {
+                        if mc.spec.url.starts_with("https://mod.io/")
+                            && ui.button("Check for updates").clicked()
+                        {
+                            ctx.check_update = Some(mc.spec.clone());
+                            ui.close_menu();
+                        }
                         if let Some(action) = editing::mod_context_menu(
                             ui,
                             &group_names,
@@ -820,6 +855,9 @@ impl App {
         }
         if ctx.copied_link {
             self.notifications.success("Copied mod link.");
+        }
+        if let Some(spec) = ctx.check_update {
+            message::UpdateCache::send_specs(self, ui.ctx(), vec![spec]);
         }
         if let Some(name) = ctx.open_group {
             self.groups_window = Some(groups::GroupsWindow::selected(name));

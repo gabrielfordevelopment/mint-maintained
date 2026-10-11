@@ -39,11 +39,11 @@ fn dragging_moves_mods_into_and_out_of_groups_without_deleting_files() {
         .groups
         .insert("Destination".into(), ModGroup::default());
     test.app.state.mod_data.get_active_profile_mut().mods = vec![
-        ModOrGroup::Individual(config.clone()),
         ModOrGroup::Group {
             group_name: "Destination".into(),
             enabled: true,
         },
+        ModOrGroup::Individual(config.clone()),
     ];
     test.frame(vec![]);
     let frame = test.frame(vec![]);
@@ -59,15 +59,30 @@ fn dragging_moves_mods_into_and_out_of_groups_without_deleting_files() {
     assert_eq!(test.app.state.mod_data.get_active_profile().mods.len(), 1);
     // A successful drop leaves the destination open.
     let frame = test.frame(vec![]);
-    let handle = button_rects(&frame, &format!("Drag {}", config.spec.url))[0].center();
-    test.drag_row(handle, egui::pos2(45.0, 230.0), true);
+    let member = button_rects(&frame, &format!("Drag {}", config.spec.url))[0];
+    let destination = egui::pos2(
+        40.0,
+        button_rects(&frame, "Drag Destination")[0].top() + 1.0,
+    );
+    test.drag_row(member.center(), destination, false);
+    let frame = test.frame(vec![]);
+    assert!(frame.shapes.iter().any(|shape| matches!(&shape.shape,
+        egui::Shape::LineSegment { points, stroke } if stroke.width == 2.0 && (points[0].y - member.bottom()).abs() < 3.0
+    )), "without standalone mods, the root insertion marker must follow the expanded group");
+    test.frame(vec![egui::Event::PointerButton {
+        pos: destination,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    test.frame(vec![]);
     assert!(
         test.app.state.mod_data.groups["Destination"]
             .mods
             .is_empty()
     );
     assert!(
-        matches!(&test.app.state.mod_data.get_active_profile().mods[0], ModOrGroup::Individual(mc) if mc == &config)
+        matches!(&test.app.state.mod_data.get_active_profile().mods[1], ModOrGroup::Individual(mc) if mc == &config)
     );
     assert_eq!(std::fs::read(&config.spec.url).unwrap(), b"UI test fixture");
     let loaded = State::init(test.app.state.dirs.clone()).unwrap();
@@ -87,11 +102,11 @@ fn hover_expands_temporarily_and_successful_drop_keeps_the_group_open() {
         },
     );
     test.app.state.mod_data.get_active_profile_mut().mods = vec![
-        ModOrGroup::Individual(dragged.clone()),
         ModOrGroup::Group {
             group_name: "Hover group".into(),
             enabled: true,
         },
+        ModOrGroup::Individual(dragged.clone()),
     ];
     test.frame(vec![]);
     let frame = test.frame(vec![]);
@@ -256,17 +271,17 @@ fn root_drops_clamp_to_the_correct_section_and_show_the_actual_boundary() {
         }
         test.frame(vec![]);
         let frame = test.frame(vec![]);
-        let boundary = button_rects(&frame, "Drag A")[0].top();
-        let outside_groups = egui::pos2(40.0, 350.0);
+        let boundary = button_rects(&frame, &format!("Drag {}", a.spec.url))[0].top();
+        let outside_groups = egui::pos2(40.0, button_rects(&frame, "Drag A")[0].center().y);
         test.drag_row(
-            button_rects(&frame, &format!("Drag {}", a.spec.url))[0].center(),
+            button_rects(&frame, &format!("Drag {}", b.spec.url))[0].center(),
             outside_groups,
             false,
         );
         let frame = test.frame(vec![]);
         assert!(frame.shapes.iter().any(|shape| matches!(&shape.shape,
             egui::Shape::LineSegment { points, stroke } if stroke.width == 2.0 && (points[0].y - boundary).abs() < 3.0
-        )), "insertion marker must stay before the first group");
+        )), "insertion marker must stay before the first standalone mod");
         test.frame(vec![egui::Event::PointerButton {
             pos: outside_groups,
             button: egui::PointerButton::Primary,
@@ -274,17 +289,17 @@ fn root_drops_clamp_to_the_correct_section_and_show_the_actual_boundary() {
             modifiers: egui::Modifiers::NONE,
         }]);
         assert_eq!(
-            test.app.state.mod_data.get_active_profile().mods[0],
+            test.app.state.mod_data.get_active_profile().mods[2],
             ModOrGroup::Individual(b)
         );
         assert_eq!(
-            test.app.state.mod_data.get_active_profile().mods[1],
+            test.app.state.mod_data.get_active_profile().mods[3],
             ModOrGroup::Individual(a)
         );
         let frame = test.frame(vec![]);
         test.drag_row(
-            button_rects(&frame, "Drag B")[0].center(),
-            egui::pos2(40.0, 10.0),
+            button_rects(&frame, "Drag A")[0].center(),
+            egui::pos2(40.0, 350.0),
             true,
         );
         assert!(
@@ -296,7 +311,7 @@ fn root_drops_clamp_to_the_correct_section_and_show_the_actual_boundary() {
                 .has_mixed_order()
         );
         assert!(
-            matches!(&test.app.state.mod_data.get_active_profile().mods[2], ModOrGroup::Group { group_name, .. } if group_name == "B")
+            matches!(&test.app.state.mod_data.get_active_profile().mods[0], ModOrGroup::Group { group_name, .. } if group_name == "B")
         );
     }
 }
@@ -308,13 +323,14 @@ fn mixed_profiles_require_confirmation_and_cancel_or_stale_accept_keeps_data() {
         let mut test = TestApp::new();
         let config = test.local_mod("legacy.pak");
         test.app.state.mod_data.get_active_profile_mut().mods = vec![
+            ModOrGroup::Individual(config.clone()),
             ModOrGroup::Group {
                 group_name: "default".into(),
                 enabled: false,
             },
-            ModOrGroup::Individual(config.clone()),
         ];
         test.app.state.mod_data.save().unwrap();
+        test.app.history = super::super::history::History::new(&test.app.state.mod_data);
         let original = (**test.app.state.mod_data).clone();
         test.frame(vec![]);
         let frame = test.frame(vec![]);
@@ -359,9 +375,14 @@ fn mixed_profiles_require_confirmation_and_cancel_or_stale_accept_keeps_data() {
             let loaded = State::init(test.app.state.dirs.clone()).unwrap();
             assert_eq!(**loaded.mod_data, **test.app.state.mod_data);
             assert!(matches!(
-                &loaded.mod_data.get_active_profile().mods[1],
+                &loaded.mod_data.get_active_profile().mods[0],
                 ModOrGroup::Group { enabled: false, .. }
             ));
+            let arranged = (**test.app.state.mod_data).clone();
+            test.app.restore_history(false, None);
+            assert_eq!(**test.app.state.mod_data, original);
+            test.app.restore_history(true, None);
+            assert_eq!(**test.app.state.mod_data, arranged);
         }
     }
 }
@@ -464,7 +485,7 @@ fn sorted_group_moves_preserve_visible_members_and_unrelated_groups() {
     );
     assert!(test.app.get_sorting_config().is_none());
     assert!(
-        matches!(test.app.state.mod_data.get_active_profile().mods.first(), Some(ModOrGroup::Individual(config)) if *config == a)
+        matches!(test.app.state.mod_data.get_active_profile().mods.last(), Some(ModOrGroup::Individual(config)) if *config == a)
     );
     test.app.update_sorting_config(Some(SortBy::Name), false);
     let frame = test.frame(vec![]);

@@ -33,6 +33,14 @@ async fn import_keeps_input_order_and_failed_entries_available_for_retry() {
     );
     for _ in 0..3 {
         app.state.mod_data.get_active_profile_mut().mods.clear();
+        app.state
+            .mod_data
+            .get_active_profile_mut()
+            .mods
+            .push(ModOrGroup::Group {
+                group_name: "default".into(),
+                enabled: true,
+            });
         let result = app.state.store.resolve_mods_partial(&inputs, false).await;
         app.resolve_mod_rid = Some(pending(&mut app, ()));
         let rid = app.resolve_mod_rid.as_ref().unwrap().rid;
@@ -44,6 +52,11 @@ async fn import_keeps_input_order_and_failed_entries_available_for_retry() {
         }
         .receive(&mut app);
         assert!(app.resolve_mod_rid.is_none());
+        assert!(matches!(
+            app.state.mod_data.get_active_profile().mods.first(),
+            Some(ModOrGroup::Group { group_name, .. }) if group_name == "default"
+        ));
+        assert!(!app.state.mod_data.get_active_profile().has_mixed_order());
         assert_eq!(
             app.state.mod_data.enabled_mods_ordered("default").unwrap(),
             specs
@@ -55,6 +68,7 @@ async fn import_keeps_input_order_and_failed_entries_available_for_retry() {
         ));
     }
     let reloaded = State::init(Dirs::from_path(directory.path()).unwrap()).unwrap();
+    assert_eq!(**reloaded.mod_data, **app.state.mod_data);
     assert_eq!(
         reloaded.mod_data.enabled_mods_ordered("default").unwrap(),
         specs
