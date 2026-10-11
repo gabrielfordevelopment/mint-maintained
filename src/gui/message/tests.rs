@@ -1,5 +1,93 @@
 use super::*;
 
+fn update_release(tag: &str) -> GitHubRelease {
+    GitHubRelease {
+        tag_name: tag.into(),
+        html_url: "https://example.com/release".into(),
+        body: "Test release".into(),
+    }
+}
+
+#[tokio::test]
+async fn application_checks_respect_dismissal_manual_requests_and_stale_results() {
+    let (_directory, mut app) = app();
+    app.update_dismissed = true;
+    app.check_updates_rid = Some(pending(&mut app, false));
+    let rid = app.check_updates_rid.as_ref().unwrap().rid;
+    CheckUpdates {
+        rid,
+        result: Ok(update_release("v99.0.0")),
+    }
+    .receive(&mut app);
+    assert!(!app.show_app_update);
+    assert!(app.available_update.is_some());
+    app.check_updates_rid = Some(pending(&mut app, true));
+    let manual_rid = app.check_updates_rid.as_ref().unwrap().rid;
+    CheckUpdates {
+        rid,
+        result: Ok(update_release("v100.0.0")),
+    }
+    .receive(&mut app);
+    assert_eq!(app.available_update.as_ref().unwrap().tag_name, "v99.0.0");
+    assert!(app.check_updates_rid.is_some());
+    CheckUpdates {
+        rid: manual_rid,
+        result: Ok(update_release("v99.0.0")),
+    }
+    .receive(&mut app);
+    assert!(app.show_app_update);
+    assert!(app.check_updates_rid.is_none());
+}
+
+#[tokio::test]
+async fn application_check_reports_current_invalid_and_failed_checks() {
+    let (_directory, mut app) = app();
+    for (result, expected) in [
+        (
+            Ok(update_release(concat!("v", env!("CARGO_PKG_VERSION")))),
+            "You are up to date.",
+        ),
+        (Ok(update_release("invalid")), "invalid release version"),
+        (
+            Err(GenericError {
+                msg: "offline".into(),
+            }),
+            "Check your connection",
+        ),
+    ] {
+        app.check_updates_rid = Some(pending(&mut app, true));
+        let rid = app.check_updates_rid.as_ref().unwrap().rid;
+        CheckUpdates { rid, result }.receive(&mut app);
+        assert!(app.app_update_status.contains(expected));
+        assert!(app.check_updates_rid.is_none());
+    }
+}
+
+#[tokio::test]
+async fn application_install_results_clear_busy_state_and_preserve_retry() {
+    let (_directory, mut app) = app();
+    for result in [
+        Ok(None),
+        Err(anyhow::anyhow!("fixture locked")),
+        Ok(Some(PathBuf::from("mint.exe"))),
+    ] {
+        app.self_update_rid = Some(pending(&mut app, SelfUpdateProgress::Preparing));
+        app.self_update_control = Some(Arc::new(crate::app_update::Control::default()));
+        let rid = app.self_update_rid.as_ref().unwrap().rid;
+        let installed = result.as_ref().is_ok_and(|path| path.is_some());
+        SelfUpdate { rid, result }.receive(&mut app);
+        assert!(app.self_update_rid.is_none());
+        assert!(app.self_update_control.is_none());
+        assert_eq!(app.original_exe_path.is_some(), installed);
+        if installed {
+            assert!(matches!(
+                app.last_action.as_ref().unwrap().status,
+                super::super::LastActionStatus::Success(_)
+            ));
+        }
+    }
+}
+
 fn app() -> (tempfile::TempDir, App) {
     let directory = tempfile::tempdir().unwrap();
     let mut app = App::load(Dirs::from_path(directory.path()).unwrap(), None).unwrap();

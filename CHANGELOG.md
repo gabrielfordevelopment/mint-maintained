@@ -4,6 +4,16 @@
 
 ## [Unreleased] - ReleaseDate
 
+## [0.5.1] - 2026-10-11
+
+### Application update fixes
+
+- Fix Windows self-updates failing while replacing the running application. Retry temporary file locks and retain a recovery copy if replacement fails.
+- Install the exact release shown in the update dialog and reject incomplete or invalid downloads before replacing the application.
+- Keep update dialogs within the window, with scrollable release notes and visible action buttons. Dismiss with Close, Escape or Remind me later, and cancel downloads before installation begins.
+- Check for application updates and reopen postponed updates from Settings. Show clear errors when checking or installing fails.
+- Preserve the selected data directory when restarting after an update, and allow restarting later.
+
 ## [0.5.0] - 2026-10-11
 
 ### Mod updates and installation status
@@ -135,6 +145,7 @@ MINT Maintained features.
 
 <!-- next-url -->
 [Unreleased]: https://github.com/gabrielfordevelopment/mint-maintained/compare/master...develop
+[0.5.1]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.5.1
 [0.5.0]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.5.0
 [0.4.0]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.4.0
 [0.3.0]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.3.0
