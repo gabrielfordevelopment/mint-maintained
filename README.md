@@ -25,7 +25,7 @@ fixes from mintfixed:
 externally of the game. This enables more stable mod usage as well as offline mod usage. Works for
 both Steam and Microsoft Store versions.
 
-![MINT Maintained 0.4.0 in light mode with demo mods and multilingual groups](docs/images/mint-0.4.0-overview-light.png)
+![MINT Maintained 0.5.0 in light mode with groups above demo mods and the two-row footer](docs/images/mint-0.5.0-overview-light.png)
 
 Mods are added via URL to a .pak or .zip containing a .pak. Mods can also be pulled from mod.io.
 Examples:
@@ -66,7 +66,7 @@ We need to provide the tool with the path to `FSD-WindowsNoEditor.pak` and a mod
 you want to use mod.io mods. These can be configured in the settings menu (cogwheel located in the
 bottom toolbar).
 
-![MINT Maintained 0.4.0 settings in light mode using isolated demo data](docs/images/mint-0.4.0-settings-light.png)
+![MINT Maintained 0.5.0 settings in light mode using isolated demo data](docs/images/mint-0.5.0-settings-light.png)
 
 #### Locating the DRG `FSD-WindowsNoEditor.pak`
 
