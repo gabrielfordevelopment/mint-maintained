@@ -60,6 +60,29 @@ instructions below. Update checks and downloads target this repository.
 
 Then, we'll need to perform some first-time setup.
 
+### Switching from another MINT version
+
+MINT Maintained supports loading saved settings, profiles, and groups from
+[Trumank's original MINT](https://github.com/trumank/mint) and
+[Wasserkleber's mintfixed](https://github.com/Wasserkleber/mintfixed).
+It reuses the existing MINT data directories, preferring legacy
+`drg-mod-integration` directories when present.
+
+[Strappazzon's MINT-NoTag](https://github.com/Strappazzon/drg-mint-notag) uses
+different settings and profile format versions that Maintained does not currently
+support. Automatic migration from other forks is not guaranteed. Before switching,
+close MINT and back up its config, cache, and data directories. If loading fails,
+keep the original files; renaming only `config.json` may still leave incompatible
+profiles. Include the previous fork and version, the Maintained version, and the
+full error message when reporting a migration problem. Do not share `config.json`
+publicly: it can contain your mod.io token.
+
+This compatibility covers MINT's saved settings and mod lists. Loading them does
+not migrate or reset in-game mod settings, and does not guarantee that every mod
+will work in the game. If DRG fails to start after switching, report that separately.
+Deleting MINT's config, cache, or data does not remove files installed into DRG;
+use **Uninstall mods** with the game closed to remove Maintained's integration.
+
 ### First Time Setup
 
 We need to provide the tool with the path to `FSD-WindowsNoEditor.pak` and a mod.io OAuth token if
