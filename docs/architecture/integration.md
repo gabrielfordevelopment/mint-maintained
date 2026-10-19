@@ -9,6 +9,10 @@
 
 Treat metadata writer/reader shape, pak paths, proxy DLL names, game signatures, and native layouts as a coordinated compatibility boundary. A Rust type compiling in both crates does not prove that an already installed pak and DLL agree. Review Steam and Microsoft Store installation variants together.
 
+[hook/src/proxy.rs](../../hook/src/proxy.rs) selects the system library from the installed proxy's own filename: Steam's `x3daudio1_7.dll` loads only system X3DAudio, and Microsoft Store's `d3d9.dll` loads only system D3D9. Unused proxy libraries and exports are not prerequisites. Every selected export is validated before publishing forwards; missing libraries/exports reject DLL attachment with a debugger diagnostic instead of terminating the process or using unchecked addresses. Native exports use x64 tail jumps to preserve their original calling conventions.
+
+[tests/hook_proxy.rs](../../tests/hook_proxy.rs) exercises selection, missing-library/export handling and release on failure in the ordinary host-test scope. Its Windows child-process tests load disposable copies of the built hook DLL without dispatching game-specific initialization. They check every selected forwarding address and compare native audio/graphics calls with the system DLL. If the required system DLL is unavailable, they report that limitation and verify attachment rejection instead. These checks do not establish Proton or in-game compatibility.
+
 ## Filesystem and runtime boundaries
 
 Integration writes into the selected game directory, independently of `--appdata`. It builds the pak and hook in temporary files beside their destinations, flushes their contents, and prepares recovery copies before replacing outputs. [transaction.rs](../../src/integrate/transaction.rs) owns replacement and rollback. On a replacement failure, previously replaced outputs are restored; if restoration itself fails, preserve the recovery copy and report its path. This is a recoverable multi-file operation, not a guarantee of atomicity across power loss or forced process termination.

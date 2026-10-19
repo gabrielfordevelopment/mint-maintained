@@ -1,4 +1,5 @@
 mod hooks;
+mod proxy;
 mod ue;
 
 use std::{io::BufReader, path::Path};
@@ -8,8 +9,6 @@ use fs_err as fs;
 use hooks::{FnLoadGameFromMemory, FnSaveGameToMemory};
 use mint_lib::mod_info::Meta;
 use tracing::{info, warn};
-
-proxy_dll::proxy_dll!([x3daudio1_7, d3d9], init);
 
 fn init() {
     unsafe {
