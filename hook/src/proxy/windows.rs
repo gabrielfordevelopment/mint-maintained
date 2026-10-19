@@ -80,7 +80,7 @@ impl Loader for SystemLoader {
 
     fn load(&mut self, target: Target) -> Result<Module, String> {
         // Always use the system directory; loading by basename would find this proxy again.
-        let mut buffer = [0u16; 32768];
+        let mut buffer = vec![0u16; 32768];
         let length = unsafe { GetSystemDirectoryW(Some(&mut buffer)) } as usize;
         if length == 0 || length >= buffer.len() {
             return Err("could not determine the system DLL directory".into());
@@ -103,8 +103,11 @@ unsafe extern "system" fn initialize_hook(_: usize) {
     super::super::init();
 }
 
+// Windows also enters DllMain on small-stack thread attach/detach notifications.
+// Keep process initialization out of that entry point's unconditional stack frame.
+#[inline(never)]
 fn attach(instance: HMODULE) -> Result<(), String> {
-    let mut buffer = [0u16; 32768];
+    let mut buffer = vec![0u16; 32768];
     let length = unsafe { GetModuleFileNameW(Some(instance), &mut buffer) } as usize;
     if length == 0 || length >= buffer.len() {
         return Err("could not determine the hook DLL filename".into());

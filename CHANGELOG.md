@@ -6,6 +6,7 @@
 
 ## [0.5.3] - 2026-10-19
 
+- Fix Windows startup crashes when the hook receives notifications on threads with small stacks.
 - Remove an unnecessary D3D9 dependency from the Steam hook that could prevent DRG from starting under Wine/Proton. Preserve the Microsoft Store version's D3D9 hook and validate required functions during loading.
 - Fix temporary executables left behind by Windows application updates. Cleanup waits for the app to exit and retries temporary file locks, while failed or interrupted replacements retain the previous executable.
 - Clarify saved-data compatibility when switching from other MINT forks.
