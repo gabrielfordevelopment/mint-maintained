@@ -4,6 +4,10 @@
 
 ## [Unreleased] - ReleaseDate
 
+## [0.5.4] - 2026-10-19
+
+- Fix Windows game startup crashes introduced in 0.5.3. Reinstall mods after updating to apply the corrected hook.
+
 ## [0.5.3] - 2026-10-19
 
 - Remove an unnecessary D3D9 dependency from the Steam hook that could prevent DRG from starting under Wine/Proton. Preserve the Microsoft Store version's D3D9 hook and validate required functions during loading.
@@ -155,6 +159,7 @@ MINT Maintained features.
 
 <!-- next-url -->
 [Unreleased]: https://github.com/gabrielfordevelopment/mint-maintained/compare/master...develop
+[0.5.4]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.5.4
 [0.5.3]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.5.3
 [0.5.2]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.5.2
 [0.5.1]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.5.1
