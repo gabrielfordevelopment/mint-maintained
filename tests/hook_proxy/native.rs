@@ -2,16 +2,24 @@ use std::{ffi::CStr, os::windows::ffi::OsStrExt, path::Path, process::Command};
 
 use windows::{
     Win32::{
-        Foundation::HMODULE,
+        Foundation::{CloseHandle, HMODULE, WAIT_OBJECT_0},
         System::{
             LibraryLoader::{GetProcAddress, LoadLibraryW},
             SystemInformation::GetSystemDirectoryW,
+            Threading::{
+                CreateThread, GetExitCodeThread, STACK_SIZE_PARAM_IS_A_RESERVATION,
+                WaitForSingleObject,
+            },
         },
     },
     core::{PCSTR, PCWSTR},
 };
 
 fn run_child(filename: &str) {
+    run_child_with_small_stack(filename, false);
+}
+
+fn run_child_with_small_stack(filename: &str, small_stack: bool) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join(filename);
     std::fs::copy(env!("CARGO_CDYLIB_FILE_HOOK_hook"), &path).unwrap();
@@ -20,6 +28,10 @@ fn run_child(filename: &str) {
     let output = Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "native::native_proxy_child", "--nocapture"])
         .env("MINT_HOOK_PROXY_CHILD", &path)
+        .env(
+            "MINT_HOOK_PROXY_SMALL_STACK",
+            if small_stack { "1" } else { "0" },
+        )
         .output()
         .unwrap();
     assert!(
@@ -31,6 +43,41 @@ fn run_child(filename: &str) {
     );
     if !output.stderr.is_empty() {
         eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+    }
+}
+
+#[test]
+fn steam_proxy_allows_small_stack_thread_notifications() {
+    run_child_with_small_stack("X3DAudio1_7.DLL", true);
+}
+
+#[test]
+fn store_proxy_allows_small_stack_thread_notifications() {
+    run_child_with_small_stack("d3d9.dll", true);
+}
+
+unsafe extern "system" fn small_stack_thread(_: *mut std::ffi::c_void) -> u32 {
+    42
+}
+
+fn assert_small_stack_thread_runs() {
+    // Windows invokes every loaded DLL's thread-attach and thread-detach callbacks
+    // on this small stack, before and after our otherwise trivial entry point.
+    unsafe {
+        let thread = CreateThread(
+            None,
+            64 * 1024,
+            Some(small_stack_thread),
+            None,
+            STACK_SIZE_PARAM_IS_A_RESERVATION,
+            None,
+        )
+        .unwrap();
+        assert_eq!(WaitForSingleObject(thread, 10_000), WAIT_OBJECT_0);
+        let mut exit_code = 0;
+        GetExitCodeThread(thread, &mut exit_code).unwrap();
+        CloseHandle(thread).unwrap();
+        assert_eq!(exit_code, 42);
     }
 }
 
@@ -110,6 +157,9 @@ fn native_proxy_child() {
         }
     };
     let proxy = load(path).unwrap();
+    if std::env::var("MINT_HOOK_PROXY_SMALL_STACK").as_deref() == Ok("1") {
+        assert_small_stack_thread_runs();
+    }
 
     // No alertable wait: the real game-specific hook is deliberately not dispatched.
     // Only the production DLL's system-library forwards are exercised here.
