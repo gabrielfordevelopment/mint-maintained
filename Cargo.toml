@@ -9,7 +9,7 @@ members = [
 repository = "https://github.com/gabrielfordevelopment/mint-maintained"
 authors = ["trumank", "jieyouxu"]
 license = "MIT OR Apache-2.0"
-version = "0.5.2"
+version = "0.5.3"
 edition = "2024"
 
 [workspace.dependencies]
@@ -117,6 +117,13 @@ lto = "off"
 winit = { version = "0.30.9", default-features = false }
 mockall = "0.13.1"
 tracing-subscriber.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+windows = { version = "0.61.3", features = [
+  "Win32_Foundation",
+  "Win32_System_LibraryLoader",
+  "Win32_System_SystemInformation",
+] }
 
 [build-dependencies]
 winresource = { version = "0.1.31", default-features = false }

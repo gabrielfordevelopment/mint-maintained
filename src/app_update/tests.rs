@@ -146,8 +146,88 @@ fn replacement_child() {
         } else {
             replace_current_executable(&candidate).unwrap();
             assert_eq!(std::fs::read(&executable).unwrap(), updated);
+            if case == "held" {
+                let directory = executable.parent().unwrap();
+                let old = std::fs::read_dir(directory)
+                    .unwrap()
+                    .map(|entry| entry.unwrap().path().join("previous.exe"))
+                    .find(|path| path.is_file())
+                    .unwrap();
+                std::fs::write(directory.join("old-path.pending"), old.to_str().unwrap()).unwrap();
+                std::fs::rename(
+                    directory.join("old-path.pending"),
+                    directory.join("old-path"),
+                )
+                .unwrap();
+                let deadline = std::time::Instant::now() + Duration::from_secs(15);
+                while !directory.join("exit").exists() {
+                    assert!(std::time::Instant::now() < deadline);
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+            }
         }
     }
+}
+
+#[cfg(windows)]
+#[test]
+fn cleanup_retries_a_lock_after_the_updating_process_exits() {
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::process::Stdio;
+
+    let directory = tempfile::tempdir().unwrap();
+    let helper_directory = directory.path().join("helpers");
+    std::fs::create_dir(&helper_directory).unwrap();
+    let executable = directory.path().join("mint-update-test.exe");
+    std::fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
+    let mut child = std::process::Command::new(&executable)
+        .args([
+            "--exact",
+            "app_update::tests::replacement_child",
+            "--nocapture",
+        ])
+        .env("MINT_REPLACEMENT_TEST", "held")
+        .env("TMP", &helper_directory)
+        .env("TEMP", &helper_directory)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    while !directory.path().join("old-path").exists() {
+        assert!(child.try_wait().unwrap().is_none());
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let old = std::fs::read_to_string(directory.path().join("old-path")).unwrap();
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(3)
+        .open(&old)
+        .unwrap();
+    std::fs::write(directory.path().join("exit"), "").unwrap();
+    assert!(child.wait().unwrap().success());
+    std::thread::sleep(Duration::from_millis(750));
+    drop(lock);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while Path::new(&old).exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        !Path::new(&old).exists(),
+        "The old executable was not cleaned up after its lock was released"
+    );
+    assert_no_update_leftovers(
+        directory.path(),
+        &[
+            "helpers",
+            "mint-update-test.exe",
+            "candidate.exe",
+            "old-path",
+            "exit",
+        ],
+    );
 }
 
 #[test]
@@ -156,7 +236,12 @@ fn a_running_executable_can_update_and_failed_updates_remain_launchable() {
         .into_iter()
         .chain(cfg!(windows).then_some("locked"))
     {
-        let directory = tempfile::tempdir().unwrap();
+        let directory = tempfile::Builder::new()
+            .prefix("mint update 中文 Кириллица & ' [test] ")
+            .tempdir()
+            .unwrap();
+        let helper_directory = directory.path().join("helpers");
+        std::fs::create_dir(&helper_directory).unwrap();
         let executable = directory.path().join("mint-update-test.exe");
         std::fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
         let result = std::process::Command::new(&executable)
@@ -166,6 +251,8 @@ fn a_running_executable_can_update_and_failed_updates_remain_launchable() {
                 "--nocapture",
             ])
             .env("MINT_REPLACEMENT_TEST", case)
+            .env("TMP", &helper_directory)
+            .env("TEMP", &helper_directory)
             .output()
             .unwrap();
         assert!(
@@ -182,5 +269,29 @@ fn a_running_executable_can_update_and_failed_updates_remain_launchable() {
             result.status.success(),
             "The application must still launch after {case}"
         );
+        assert_no_update_leftovers(&helper_directory, &[]);
+        assert_no_update_leftovers(
+            directory.path(),
+            &["helpers", "mint-update-test.exe", "candidate.exe"],
+        );
+    }
+}
+
+fn assert_no_update_leftovers(directory: &Path, expected: &[&str]) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let leftovers: Vec<_> = std::fs::read_dir(directory)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .filter(|name| !expected.iter().any(|expected| name == expected))
+            .collect();
+        if leftovers.is_empty() {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "Updater left {leftovers:?}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
     }
 }
