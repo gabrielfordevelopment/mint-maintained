@@ -610,7 +610,7 @@ impl eframe::App for App {
                     },
                 );
                 ui.add_enabled_ui(!self.editing_busy(), |ui| {
-                    ui.menu_button("Check updates", |ui| {
+                    ui.menu_button("Check mod updates", |ui| {
                         if ui.button("Current profile").clicked() {
                             message::UpdateCache::send_specs(
                                 self,
@@ -836,6 +836,15 @@ impl eframe::App for App {
             });
             ui.add_space(4.);
 
+            if self
+                .state
+                .mod_data
+                .profiles
+                .get(&profile)
+                .is_some_and(|p| p.mods.is_empty())
+            {
+                ui.weak("This profile has no mods yet. Paste a mod.io link, URL or file path into Add mod, or drop .pak files onto this window.");
+            }
             self.ui_profile(ui, &profile);
 
             // must access memory outside of input lock to prevent deadlock
