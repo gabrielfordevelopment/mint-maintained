@@ -164,7 +164,7 @@ mod tests {
         redact_with(
             text,
             &["s3cr3t-token-value".into()],
-            &["Gabriel".into(), "steamuser".into()],
+            &["Alice".into(), "steamuser".into()],
         )
     }
 
@@ -193,20 +193,20 @@ mod tests {
     #[test]
     fn user_names_are_removed_only_as_path_segments() {
         assert_eq!(
-            redact(r"config dir = C:\Users\gabriel\AppData\Roaming\mint"),
+            redact(r"config dir = C:\Users\alice\AppData\Roaming\mint"),
             r"config dir = C:\Users\<user>\AppData\Roaming\mint"
         );
         assert_eq!(
-            redact(r#"open "C:\\Users\\Gabriel\\mods" Z:\home\Gabriel"#),
+            redact(r#"open "C:\\Users\\Alice\\mods" Z:\home\Alice"#),
             r#"open "C:\\Users\\<user>\\mods" Z:\home\<user>"#
         );
         assert_eq!(
-            redact("/home/Gabriel/.steam and C:/users/steamuser/x"),
+            redact("/home/Alice/.steam and C:/users/steamuser/x"),
             "/home/<user>/.steam and C:/users/<user>/x"
         );
         assert_eq!(
-            redact("https://github.com/gabrielfordevelopment/mint by Gabriel"),
-            "https://github.com/gabrielfordevelopment/mint by Gabriel"
+            redact("https://github.com/alicedev/mint by Alice"),
+            "https://github.com/alicedev/mint by Alice"
         );
     }
 
