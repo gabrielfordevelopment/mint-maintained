@@ -8,18 +8,34 @@ use anyhow::{Context, Result};
 use fs_err as fs;
 use hooks::{FnLoadGameFromMemory, FnSaveGameToMemory};
 use mint_lib::mod_info::Meta;
-use tracing::{info, warn};
+use tracing::{error, info};
 
 fn init() {
-    unsafe {
-        patch().ok();
+    let exe_path = std::env::current_exe().ok();
+    if let Err(error) = setup_logging(exe_path.as_deref()) {
+        // stderr still reaches a terminal or the Proton log when the log file is unavailable.
+        let error = mint_lib::redaction::redact(&format!("{error:?}"));
+        eprintln!("MINT hook: failed to set up logging: {error}");
+    }
+
+    // This runs from an APC, where an escaping panic would abort the game. A failed or
+    // panicking initialization leaves the game running without (some) MINT hooks instead;
+    // the panic itself is recorded by the logging panic hook.
+    match std::panic::catch_unwind(|| unsafe { patch(exe_path.as_deref()) }) {
+        Ok(Ok(())) => info!("hook initialized"),
+        Ok(Err(error)) => error!("hook initialization failed: {error:?}"),
+        Err(_) => error!("hook initialization panicked"),
     }
 }
 
-static mut GLOBALS: Option<Globals> = None;
-thread_local! {
-    static LOG_GUARD: std::cell::RefCell<Option<tracing_appender::non_blocking::WorkerGuard>>  = None.into();
+fn setup_logging(exe_path: Option<&Path>) -> Result<()> {
+    let bin_dir = exe_path
+        .and_then(Path::parent)
+        .context("could not determine the game binary directory")?;
+    mint_lib::setup_logging(bin_dir.join("mint_hook.log"), "hook")
 }
+
+static mut GLOBALS: Option<Globals> = None;
 
 pub struct Globals {
     resolution: hook_resolvers::HookResolution,
@@ -98,40 +114,46 @@ pub fn globals() -> &'static Globals {
     }
 }
 
-unsafe fn patch() -> Result<()> {
-    let exe_path = std::env::current_exe().ok();
-    let bin_dir = exe_path.as_deref().and_then(Path::parent);
+unsafe fn patch(exe_path: Option<&Path>) -> Result<()> {
+    let exe_path = exe_path.context("could not determine the game executable")?;
+    info!("game executable: {}", exe_path.display());
 
-    let guard = bin_dir
-        .and_then(|bin_dir| mint_lib::setup_logging(bin_dir.join("mint_hook.log"), "hook").ok());
-    if guard.is_none() {
-        warn!("failed to set up logging");
-    }
-
-    let pak_path = bin_dir
-        .and_then(Path::parent)
-        .and_then(Path::parent)
+    let pak_path = exe_path
+        .ancestors()
+        .nth(3)
         .map(|p| p.join("Content/Paks/mods_P.pak"))
         .context("could not determine pak path")?;
+    info!("reading integration metadata from {}", pak_path.display());
+    let meta = read_meta(&pak_path)?;
+    info!(
+        "integration metadata: MINT {}, {} mods",
+        meta.version,
+        meta.mods.len()
+    );
 
-    let mut pak_reader = BufReader::new(fs::File::open(pak_path)?);
-    let pak = repak::PakBuilder::new().reader(&mut pak_reader)?;
-
-    let meta_buf = pak.get("meta", &mut pak_reader)?;
-    let meta: Meta = postcard::from_bytes(&meta_buf)?;
-
-    let image = patternsleuth::process::internal::read_image()?;
-    let resolution = image.resolve(hook_resolvers::HookResolution::resolver())?;
+    info!("resolving hook targets in the game executable");
+    let image = patternsleuth::process::internal::read_image()
+        .context("could not read the game executable image")?;
+    let resolution = image
+        .resolve(hook_resolvers::HookResolution::resolver())
+        .context("could not resolve hook targets")?;
     info!("PS scan: {:#x?}", resolution);
 
     unsafe {
         GLOBALS = Some(Globals { resolution, meta });
-        LOG_GUARD.with_borrow_mut(|g| *g = guard);
 
-        hooks::initialize()?;
+        hooks::initialize()
     }
+}
 
-    info!("hook initialized");
-
-    Ok(())
+fn read_meta(pak_path: &Path) -> Result<Meta> {
+    let mut pak_reader = BufReader::new(fs::File::open(pak_path)?);
+    let pak = repak::PakBuilder::new()
+        .reader(&mut pak_reader)
+        .context("could not read the mods pak index")?;
+    let meta_buf = pak
+        .get("meta", &mut pak_reader)
+        .context("could not read integration metadata from the mods pak")?;
+    postcard::from_bytes(&meta_buf)
+        .context("could not decode integration metadata; reinstall mods with this MINT version")
 }

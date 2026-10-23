@@ -202,7 +202,11 @@ pub struct BlobCache {
 
 impl BlobCache {
     pub(super) fn new<P: AsRef<Path>>(path: P) -> Self {
-        fs::create_dir(&path).ok();
+        if let Err(error) = fs::create_dir(&path)
+            && error.kind() != std::io::ErrorKind::AlreadyExists
+        {
+            tracing::warn!("could not create blob cache directory: {error}");
+        }
         Self {
             path: path.as_ref().to_path_buf(),
         }

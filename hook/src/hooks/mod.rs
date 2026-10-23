@@ -9,13 +9,14 @@ use std::{
     sync::OnceLock,
 };
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use fs_err as fs;
 use mint_lib::DRGInstallationType;
+use tracing::{info, warn};
 use windows::Win32::System::Memory::{PAGE_EXECUTE_READWRITE, VirtualProtect};
 
 use crate::{
-    LOG_GUARD, globals,
+    globals,
     ue::{self, FLinearColor, UObject},
 };
 
@@ -59,49 +60,64 @@ pub unsafe fn initialize() -> Result<()> {
     .cloned()
     .collect::<std::collections::HashMap<_, ExecFn>>();
 
-    unsafe {
-        WinMain.initialize(
-            std::mem::transmute(globals().resolution.core.as_ref().unwrap().main.0),
-            detour_main,
-        )?;
-        WinMain.enable()?;
+    let core = globals()
+        .resolution
+        .core
+        .as_ref()
+        .map_err(|error| anyhow!("required game functions were not found: {error:?}"))?;
 
-        HookUFunctionBind.initialize(
-            std::mem::transmute(globals().resolution.core.as_ref().unwrap().ufunction_bind.0),
-            move |function| {
-                HookUFunctionBind.call(function);
-                if let Some(function) = function.as_mut() {
-                    let path = function
-                        .ustruct
-                        .ufield
-                        .uobject
-                        .uobject_base_utility
-                        .uobject_base
-                        .get_path_name(None);
-                    if let Some(hook) = hooks.get(path.as_str()) {
-                        function
-                            .function_flags
-                            .insert(ue::EFunctionFlags::FUNC_Native);
-                        function.func = *hook;
+    unsafe {
+        info!("installing WinMain hook");
+        WinMain
+            .initialize(std::mem::transmute(core.main.0), detour_main)
+            .context("could not create WinMain hook")?;
+        WinMain.enable().context("could not enable WinMain hook")?;
+
+        info!("installing UFunction::Bind hook");
+        HookUFunctionBind
+            .initialize(
+                std::mem::transmute(core.ufunction_bind.0),
+                move |function| {
+                    HookUFunctionBind.call(function);
+                    if let Some(function) = function.as_mut() {
+                        let path = function
+                            .ustruct
+                            .ufield
+                            .uobject
+                            .uobject_base_utility
+                            .uobject_base
+                            .get_path_name(None);
+                        if let Some(hook) = hooks.get(path.as_str()) {
+                            function
+                                .function_flags
+                                .insert(ue::EFunctionFlags::FUNC_Native);
+                            function.func = *hook;
+                        }
                     }
-                }
-            },
-        )?;
-        HookUFunctionBind.enable()?;
+                },
+            )
+            .context("could not create UFunction::Bind hook")?;
+        HookUFunctionBind
+            .enable()
+            .context("could not enable UFunction::Bind hook")?;
 
         server_list::init_hooks()?;
 
         let installation_type = DRGInstallationType::from_exe_path()?;
+        info!("installation type: {installation_type:?}");
 
         match installation_type {
-            DRGInstallationType::Steam => {
-                if let Ok(address) = &globals().resolution.disable {
+            DRGInstallationType::Steam => match &globals().resolution.disable {
+                Ok(address) => {
+                    info!("patching the modding check at {:#x}", address.0);
                     patch_mem(
                         (address.0 as *mut u8).add(29),
                         [0xB8, 0x01, 0x00, 0x00, 0x00],
-                    )?;
+                    )
+                    .context("could not patch the modding check")?;
                 }
-            }
+                Err(error) => warn!("modding check not found, leaving it unpatched: {error:?}"),
+            },
             DRGInstallationType::Xbox => {
                 let saves_dir = std::env::current_exe()
                     .ok()
@@ -114,26 +130,32 @@ pub unsafe fn initialize() -> Result<()> {
                     .join("SaveGames");
                 SAVES_DIR.get_or_init(|| saves_dir);
 
-                if let Ok(save_game) = &globals().resolution.save_game {
-                    SaveGameToSlot
-                        .initialize(
-                            std::mem::transmute(save_game.save_game_to_slot.0),
-                            save_game_to_slot_detour,
-                        )?
-                        .enable()?;
-                    LoadGameFromSlot
-                        .initialize(
-                            std::mem::transmute(save_game.load_game_from_slot.0),
-                            load_game_from_slot_detour,
-                        )?
-                        .enable()?;
+                match &globals().resolution.save_game {
+                    Ok(save_game) => {
+                        info!("installing save game hooks");
+                        SaveGameToSlot
+                            .initialize(
+                                std::mem::transmute(save_game.save_game_to_slot.0),
+                                save_game_to_slot_detour,
+                            )?
+                            .enable()?;
+                        LoadGameFromSlot
+                            .initialize(
+                                std::mem::transmute(save_game.load_game_from_slot.0),
+                                load_game_from_slot_detour,
+                            )?
+                            .enable()?;
 
-                    DoesSaveGameExist
-                        .initialize(
-                            std::mem::transmute(save_game.does_save_game_exist.0),
-                            does_save_game_exist_detour,
-                        )?
-                        .enable()?;
+                        DoesSaveGameExist
+                            .initialize(
+                                std::mem::transmute(save_game.does_save_game_exist.0),
+                                does_save_game_exist_detour,
+                            )?
+                            .enable()?;
+                    }
+                    Err(error) => warn!(
+                        "save game functions not found, mod saves use the default location: {error:?}"
+                    ),
                 }
             }
         }
@@ -205,11 +227,19 @@ fn save_game_to_slot_detour(
                 return false;
             };
 
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).ok();
+            if let Some(parent) = path.parent()
+                && let Err(error) = fs::create_dir_all(parent)
+            {
+                warn!("could not create mod save directory: {error}");
             }
 
-            fs::write(path, data.as_slice()).is_ok()
+            match fs::write(path, data.as_slice()) {
+                Ok(()) => true,
+                Err(error) => {
+                    warn!("could not write mod save: {error}");
+                    false
+                }
+            }
         }
     }
 }
@@ -258,8 +288,7 @@ fn detour_main(
         )
     };
 
-    // about to exit, drop log guard
-    drop(LOG_GUARD.with_borrow_mut(|g| g.take()).unwrap());
+    info!("game main function returned {ret}");
 
     ret
 }

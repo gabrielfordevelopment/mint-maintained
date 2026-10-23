@@ -118,7 +118,7 @@ fn main() -> Result<()> {
 
     unsafe { std::env::set_var("RUST_BACKTRACE", "1") };
 
-    let _guard = mint_lib::setup_logging(dirs.data_dir.join("mint.log"), "mint")?;
+    mint_lib::setup_logging(dirs.data_dir.join("mint.log"), "mint")?;
     debug!("logging setup complete");
 
     info!("config dir = {}", dirs.config_dir.display());

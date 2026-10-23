@@ -137,7 +137,7 @@ fn native_update_preview() {
         "Copy the test executable beside its disposable app data before opening the update fixture"
     );
     let dirs = Dirs::from_path(&directory).unwrap();
-    let _logging = mint_lib::setup_logging(dirs.data_dir.join("mint.log"), "mint").unwrap();
+    mint_lib::setup_logging(dirs.data_dir.join("mint.log"), "mint").unwrap();
     eframe::run_native(
         "MINT update test",
         eframe::NativeOptions {

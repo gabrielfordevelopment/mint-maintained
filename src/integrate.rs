@@ -70,7 +70,10 @@ pub fn uninstall<P: AsRef<Path>>(path_pak: P, modio_mods: HashSet<u32>) -> Resul
         }
         .with_whatever_context(|_| format!("failed to remove {}", path_hook_dll.display()))?;
     }
-    uninstall_modio(&installation, modio_mods).ok();
+    if let Err(error) = uninstall_modio(&installation, modio_mods) {
+        // Commonly absent when the in-game mod.io integration was never used.
+        info!("skipped removing mod.io subscriptions from the game config: {error}");
+    }
     Ok(())
 }
 
