@@ -4,6 +4,10 @@
 
 ## [Unreleased] - ReleaseDate
 
+## [0.5.6] - 2026-10-24
+
+- Fix Deep Rock Galactic closing immediately at startup after installing mods with the Linux version of MINT. Reinstall mods after updating to apply the fixed hook.
+
 ## [0.5.5] - 2026-10-24
 
 - Improve diagnostics for crashes and failures. Logs are written immediately and record panics, so `mint.log` and `mint_hook.log` keep their last entries even if the app or game stops unexpectedly. The game hook logs each startup step and the reason it failed, and a hook startup failure no longer closes the game. Logs no longer contain provider tokens or your user name in file paths. Reinstall mods after updating to apply the updated hook.
@@ -165,6 +169,7 @@ MINT Maintained features.
 
 <!-- next-url -->
 [Unreleased]: https://github.com/gabrielfordevelopment/mint-maintained/compare/master...develop
+[0.5.6]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.5.6
 [0.5.5]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.5.5
 [0.5.4]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.5.4
 [0.5.3]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.5.3

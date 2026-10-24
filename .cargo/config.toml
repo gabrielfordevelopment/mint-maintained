@@ -1,2 +1,12 @@
 [unstable]
 bindeps = true
+
+# The Linux build embeds a windows-gnu hook DLL. Its thread-locals use native TLS, and older GNU ld
+# releases (such as 2.38 on Ubuntu 22.04) emit 32-bit base relocations for their TLS offsets. These
+# corrupt every thread-local access once the DLL is loaded away from its preferred base, the usual
+# case under Windows and Wine. Link with the toolchain's lld instead of the system linker.
+# MinGW GCC builds configured with a fixed linker (such as Ubuntu's) ignore the gcc-ld directory and
+# look only for x86_64-w64-mingw32-ld.lld next to their default linker, silently falling back to
+# GNU ld otherwise. CI links rust-lld under that name. tests/hook_relocations.rs checks the result.
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-Zunstable-options", "-Clinker-features=+lld", "-Clink-self-contained=+linker"]
