@@ -247,7 +247,6 @@ impl ResolveMods {
                     app.last_action = Some(LastAction::failure("no provider".to_string()));
                 }
                 Err(e) => {
-                    error!("{}", e);
                     app.problematic_mod_id = e.opt_mod_id();
                     app.last_action =
                         Some(LastAction::failure(super::diagnostics::error_details(&e)));
@@ -317,7 +316,6 @@ impl Integrate {
                     app.last_action = Some(LastAction::failure("no provider".to_string()));
                 }
                 Err(e) => {
-                    error!("{}", e);
                     app.problematic_mod_id = e.opt_mod_id();
                     app.last_action =
                         Some(LastAction::failure(super::diagnostics::error_details(&e)));
@@ -630,7 +628,6 @@ impl LintMods {
                     app.last_action = Some(LastAction::failure("no provider".to_string()));
                 }
                 Err(e) => {
-                    error!("{}", e);
                     app.problematic_mod_id = e.opt_mod_id();
                     app.last_action =
                         Some(LastAction::failure(super::diagnostics::error_details(&e)));

@@ -1,7 +1,8 @@
 use std::ffi::c_void;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use tracing::{info, warn};
 
 use crate::globals;
 use crate::hooks::ExecFn;
@@ -20,26 +21,32 @@ pub fn kismet_hooks() -> &'static [(&'static str, ExecFn)] {
 }
 
 pub unsafe fn init_hooks() -> Result<()> {
-    if let Ok(server_name) = &globals().resolution.server_name {
-        unsafe {
+    match &globals().resolution.server_name {
+        Ok(server_name) => unsafe {
+            info!("installing server name hook");
             GetServerName
                 .initialize(
                     std::mem::transmute(server_name.get_server_name.0),
                     detour_get_server_name,
                 )?
-                .enable()?;
-        }
+                .enable()
+                .context("could not install server name hook")?;
+        },
+        Err(error) => warn!("server name function not found, skipping its hook: {error:?}"),
     }
 
-    if let Ok(server_mods) = &globals().resolution.server_mods {
-        unsafe {
+    match &globals().resolution.server_mods {
+        Ok(server_mods) => unsafe {
+            info!("installing server mod list hook");
             USessionHandlingFSDFillSessionSetting
                 .initialize(
                     std::mem::transmute(server_mods.fill_session_setting.0),
                     detour_fill_session_setting,
                 )?
-                .enable()?;
-        }
+                .enable()
+                .context("could not install server mod list hook")?;
+        },
+        Err(error) => warn!("server mod list functions not found, skipping their hook: {error:?}"),
     }
 
     Ok(())

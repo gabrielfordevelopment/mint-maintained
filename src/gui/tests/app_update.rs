@@ -117,6 +117,84 @@ async fn update_closes_immediately_with_escape_and_reopens_from_settings() {
     assert!(!test.app.show_app_update);
 }
 
+fn key(key: egui::Key) -> egui::Event {
+    egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }
+}
+
+#[tokio::test]
+async fn running_update_ignores_escape_and_outside_clicks_and_close_only_cancels() {
+    let mut test = TestApp::new();
+    let size = egui::vec2(900.0, 600.0);
+    let control = std::sync::Arc::new(crate::app_update::Control::default());
+    test.app.available_update = Some(release());
+    test.app.show_app_update = true;
+    test.app.self_update_control = Some(control.clone());
+    test.app.self_update_rid = Some(MessageHandle {
+        rid: test.app.request_counter.next(),
+        handle: tokio::spawn(async {}),
+        state: crate::app_update::Progress::Downloading {
+            downloaded: 10,
+            total: Some(100),
+        },
+        cancellation: None,
+    });
+    for _ in 0..3 {
+        frame(&mut test, size, vec![]);
+    }
+
+    frame(&mut test, size, vec![key(egui::Key::Escape)]);
+    click(&mut test, size, egui::pos2(5.0, 5.0));
+    assert!(test.app.show_app_update);
+    assert!(control.can_cancel(), "the download must keep running");
+
+    let output = frame(&mut test, size, vec![]);
+    assert!(button_rects(&output, "Close update").is_empty());
+    click(
+        &mut test,
+        size,
+        button_rects(&output, "Cancel update")[0].center(),
+    );
+    assert!(
+        test.app.show_app_update,
+        "the cancellation result stays visible"
+    );
+    assert!(!control.can_cancel());
+}
+
+#[tokio::test]
+async fn update_heading_shows_current_version_and_failure_offers_retry() {
+    let mut test = TestApp::new();
+    let size = egui::vec2(900.0, 600.0);
+    test.app.available_update = Some(release());
+    test.app.show_app_update = true;
+    for _ in 0..3 {
+        frame(&mut test, size, vec![]);
+    }
+    let output = frame(&mut test, size, vec![]);
+    text_rect(
+        &output,
+        &format!(
+            "Update available: v99.0.0 (current: v{})",
+            mint_lib::built_info::version()
+        ),
+    );
+    assert!(!button_rects(&output, "Install update").is_empty());
+    assert!(button_rects(&output, "Retry").is_empty());
+
+    test.app.app_update_status = "Update failed: the download was interrupted".into();
+    frame(&mut test, size, vec![]);
+    let output = frame(&mut test, size, vec![]);
+    assert!(button_rects(&output, "Install update").is_empty());
+    assert!(!button_rects(&output, "Retry").is_empty());
+    assert!(!button_rects(&output, "Details").is_empty());
+}
+
 // Opt-in native fixture: the ordinary test suite never opens a window or installs a release.
 #[test]
 fn native_update_preview() {
@@ -137,7 +215,7 @@ fn native_update_preview() {
         "Copy the test executable beside its disposable app data before opening the update fixture"
     );
     let dirs = Dirs::from_path(&directory).unwrap();
-    let _logging = mint_lib::setup_logging(dirs.data_dir.join("mint.log"), "mint").unwrap();
+    mint_lib::setup_logging(dirs.data_dir.join("mint.log"), "mint").unwrap();
     eframe::run_native(
         "MINT update test",
         eframe::NativeOptions {

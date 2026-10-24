@@ -613,7 +613,7 @@ fn footer_centers_text_and_icons_without_increasing_button_height() {
         assert!(settings.top() > 470.0 && settings.bottom() <= 500.0);
         for label in [
             "Check mod files",
-            "Check updates",
+            "Check mod updates",
             "Uninstall mods",
             "Install mods",
         ] {

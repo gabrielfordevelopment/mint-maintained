@@ -1,11 +1,9 @@
 pub mod error;
 pub mod mod_info;
+pub mod redaction;
 pub mod update;
 
-use std::{
-    io::BufWriter,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use fs_err as fs;
@@ -155,10 +153,14 @@ impl DRGInstallation {
     }
 }
 
-pub fn setup_logging<P: AsRef<Path>>(
-    log_path: P,
-    target: &str,
-) -> Result<tracing_appender::non_blocking::WorkerGuard> {
+/// Installs the global subscriber and records panics in the log.
+///
+/// File and stderr output pass through [`redaction`], which removes registered secrets,
+/// credential parameters and the user's name in paths.
+///
+/// Each event is written to the file before the logging call returns, so the log survives a
+/// process that aborts or is terminated without unwinding. Call this once per process.
+pub fn setup_logging<P: AsRef<Path>>(log_path: P, target: &str) -> Result<()> {
     use tracing::metadata::LevelFilter;
     use tracing_subscriber::prelude::*;
     use tracing_subscriber::{
@@ -184,16 +186,20 @@ pub fn setup_logging<P: AsRef<Path>>(
         }
     }
 
-    let f = fs::File::create(log_path.as_ref())?;
-    let writer = BufWriter::new(f);
-    let (log_file_appender, guard) = tracing_appender::non_blocking(writer);
+    // Unbuffered: every formatted event reaches the OS in a single write. The shared handle
+    // needs no lock, so a panic raised while logging cannot deadlock the panic hook.
+    let file = std::sync::Arc::new(fs::File::create(log_path.as_ref())?.into_parts().0);
     let debug_file_log = fmt::layer()
-        .with_writer(log_file_appender)
+        .with_writer(redaction::Redacting(file))
         .fmt_fields(NewType(Pretty::default()))
         .with_ansi(false)
-        .with_filter(filter::Targets::new().with_target(target, Level::DEBUG));
+        .with_filter(
+            filter::Targets::new()
+                .with_target(target, Level::DEBUG)
+                .with_target(module_path!(), Level::DEBUG),
+        );
     let stderr_log = fmt::layer()
-        .with_writer(std::io::stderr)
+        .with_writer(redaction::Redacting(std::io::stderr))
         .event_format(tracing_subscriber::fmt::format().without_time())
         .with_span_events(FmtSpan::CLOSE)
         .with_filter(
@@ -206,11 +212,35 @@ pub fn setup_logging<P: AsRef<Path>>(
         .with(debug_file_log);
 
     tracing::subscriber::set_global_default(subscriber)?;
+    std::panic::set_hook(Box::new(log_panic));
 
     debug!("tracing subscriber setup");
     info!("writing logs to {:?}", log_path.as_ref().display());
     info!("version: {}", built_info::version());
     debug!("git build: {:?}", built_info::GIT_VERSION);
+    info!(
+        "platform: {} {}",
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    );
 
-    Ok(guard)
+    Ok(())
+}
+
+/// Records a panic with its location, thread and backtrace. Panics that cross an FFI boundary,
+/// such as in the game hook, abort the process, so this may be the only trace they leave.
+fn log_panic(info: &std::panic::PanicHookInfo<'_>) {
+    let payload = info.payload();
+    let message = payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("<non-string panic payload>");
+    let location = info
+        .location()
+        .map_or_else(|| "<unknown location>".to_owned(), ToString::to_string);
+    let thread = std::thread::current();
+    let thread = thread.name().unwrap_or("<unnamed>");
+    let backtrace = std::backtrace::Backtrace::force_capture();
+    error!("panic on thread '{thread}' at {location}: {message}\nbacktrace:\n{backtrace}");
 }

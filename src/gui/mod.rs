@@ -58,7 +58,7 @@ use tokio::{
     sync::mpsc::{self, Receiver, Sender},
     task::JoinHandle,
 };
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 use crate::Dirs;
 use crate::gui::find_string::searchable_text;
@@ -135,8 +135,8 @@ impl eframe::App for StartupApp {
             ui.label("Your files have not been reset. Back up the affected file before repairing it, then retry. For a write error, check folder permissions and whether another application has locked the file.");
             ui.label(format!("Config: {}\nCache: {}", self.dirs.config_dir.display(), self.dirs.cache_dir.display()));
             ui.horizontal(|ui| {
-                if ui.button("Open config folder").clicked() { let _ = opener::open(&self.dirs.config_dir); }
-                if ui.button("Open cache folder").clicked() { let _ = opener::open(&self.dirs.cache_dir); }
+                if ui.button("Open config folder").clicked() && let Err(error) = opener::open(&self.dirs.config_dir) { warn!("Could not open the config folder: {error}"); }
+                if ui.button("Open cache folder").clicked() && let Err(error) = opener::open(&self.dirs.cache_dir) { warn!("Could not open the cache folder: {error}"); }
                 if ui.button("Retry").clicked() {
                     match App::load(self.dirs.clone(), self.args.clone()) {
                         Ok(app) => self.app = Some(app),
@@ -232,6 +232,9 @@ impl LastAction {
         }
     }
     fn failure(msg: String) -> Self {
+        // The footer is often the only report of a failure; keep it in the log as well.
+        // Log output is redacted centrally by mint_lib.
+        warn!("{msg}");
         Self {
             timestamp: Instant::now(),
             status: LastActionStatus::Failure(msg),
@@ -607,7 +610,7 @@ impl eframe::App for App {
                     },
                 );
                 ui.add_enabled_ui(!self.editing_busy(), |ui| {
-                    ui.menu_button("Check updates", |ui| {
+                    ui.menu_button("Check mod updates", |ui| {
                         if ui.button("Current profile").clicked() {
                             message::UpdateCache::send_specs(
                                 self,
@@ -833,6 +836,15 @@ impl eframe::App for App {
             });
             ui.add_space(4.);
 
+            if self
+                .state
+                .mod_data
+                .profiles
+                .get(&profile)
+                .is_some_and(|p| p.mods.is_empty())
+            {
+                ui.weak("This profile has no mods yet. Paste a mod.io link, URL or file path into Add mod, or drop .pak files onto this window.");
+            }
             self.ui_profile(ui, &profile);
 
             // must access memory outside of input lock to prevent deadlock

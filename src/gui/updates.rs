@@ -156,6 +156,8 @@ impl App {
                         .truncate(),
                     );
                     ui.ctx().request_repaint_after(Duration::from_secs(1));
+                } else if self.state.config.drg_pak_path.is_none() {
+                    ui.weak("Select your DRG installation in Settings to install mods.");
                 } else {
                     ui.weak("Ready");
                 }

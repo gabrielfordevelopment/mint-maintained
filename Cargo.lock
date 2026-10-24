@@ -2384,7 +2384,7 @@ dependencies = [
 
 [[package]]
 name = "hook"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "anyhow",
  "bitflags 2.9.3",
@@ -2399,14 +2399,13 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
- "tracing-appender",
  "widestring",
  "windows 0.61.3",
 ]
 
 [[package]]
 name = "hook_resolvers"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "patternsleuth",
  "serde",
@@ -3292,7 +3291,7 @@ dependencies = [
 
 [[package]]
 name = "mint"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -3355,7 +3354,7 @@ dependencies = [
 
 [[package]]
 name = "mint_lib"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "anyhow",
  "built",
@@ -3367,7 +3366,6 @@ dependencies = [
  "snafu",
  "steamlocate",
  "tracing",
- "tracing-appender",
  "tracing-subscriber",
 ]
 
@@ -5972,18 +5970,6 @@ dependencies = [
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",
-]
-
-[[package]]
-name = "tracing-appender"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3566e8ce28cc0a3fe42519fc80e6b4c943cc4c8cef275620eb8dac2d3d4e06cf"
-dependencies = [
- "crossbeam-channel",
- "thiserror 1.0.66",
- "time",
- "tracing-subscriber",
 ]
 
 [[package]]

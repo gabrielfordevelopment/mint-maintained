@@ -166,22 +166,28 @@ impl App {
 
                         let config_dir = &self.state.dirs.config_dir;
                         ui.label("Config directory:");
-                        if ui.link(config_dir.display().to_string()).clicked() {
-                            opener::open(config_dir).ok();
+                        if ui.link(config_dir.display().to_string()).clicked()
+                            && let Err(error) = opener::open(config_dir)
+                        {
+                            self.last_action = Some(LastAction::failure(format!("Could not open the config directory: {error}")));
                         }
                         ui.end_row();
 
                         let cache_dir = &self.state.dirs.cache_dir;
                         ui.label("Cache directory:");
-                        if ui.link(cache_dir.display().to_string()).clicked() {
-                            opener::open(cache_dir).ok();
+                        if ui.link(cache_dir.display().to_string()).clicked()
+                            && let Err(error) = opener::open(cache_dir)
+                        {
+                            self.last_action = Some(LastAction::failure(format!("Could not open the cache directory: {error}")));
                         }
                         ui.end_row();
 
                         let data_dir = &self.state.dirs.data_dir;
                         ui.label("Data directory:");
-                        if ui.link(data_dir.display().to_string()).clicked() {
-                            opener::open(data_dir).ok();
+                        if ui.link(data_dir.display().to_string()).clicked()
+                            && let Err(error) = opener::open(data_dir)
+                        {
+                            self.last_action = Some(LastAction::failure(format!("Could not open the data directory: {error}")));
                         }
                         ui.end_row();
 

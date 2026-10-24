@@ -18,7 +18,8 @@ impl App {
             .as_ref()
             .is_some_and(|c| c.can_cancel());
         let can_install = !self.editing_busy();
-        let can_close = !busy || completed || cancellable;
+        let running = busy && !completed;
+        let can_close = !running || cancellable;
         let mut dismiss = false;
         let mut start = false;
         let mut cancel = false;
@@ -32,11 +33,19 @@ impl App {
             ui.set_width(width);
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
             ui.horizontal(|ui| {
-                ui.heading(format!("Update available: {tag}"));
+                ui.heading(format!(
+                    "Update available: {tag} (current: v{})",
+                    mint_lib::built_info::version()
+                ));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     dismiss = ui
                         .add_enabled_ui(can_close, |ui| {
-                            icons::button(ui, Icon::Close, "Close update")
+                            let label = if running {
+                                "Cancel update"
+                            } else {
+                                "Close update"
+                            };
+                            icons::button(ui, Icon::Close, label)
                         })
                         .inner
                         .clicked();
@@ -101,8 +110,12 @@ impl App {
                         .add_enabled(cancellable, egui::Button::new("Cancel"))
                         .clicked();
                 } else {
+                    let label = if failed { "Retry" } else { "Install update" };
                     start = ui
-                        .add_enabled(can_install, egui::Button::new("Install update"))
+                        .add_enabled(can_install, egui::Button::new(label))
+                        .on_disabled_hover_text(
+                            "Wait for the current mod operation to finish before updating.",
+                        )
                         .clicked();
                     dismiss |= ui.button("Remind me later").clicked();
                     if failed {
@@ -111,15 +124,11 @@ impl App {
                 }
             });
         });
-        if can_close
-            && (dismiss || response.should_close())
-            && (!busy
-                || completed
-                || self
-                    .self_update_control
-                    .as_ref()
-                    .is_some_and(|c| c.cancel()))
-        {
+        // While an update runs, an accidental Escape or click outside must not stop it, and
+        // the close button only requests cancellation so its result stays visible here.
+        if running {
+            cancel |= dismiss;
+        } else if dismiss || response.should_close() {
             self.show_app_update = false;
             self.update_dismissed = true;
         }
