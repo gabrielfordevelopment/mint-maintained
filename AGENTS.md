@@ -87,7 +87,7 @@
 
 - Use the repository's nightly Rust toolchain. Cargo artifact dependencies require the existing `bindeps` configuration and the Windows hook target, including when building the Linux loader.
 - On Windows, use an x64 Visual Studio Developer PowerShell with the MSVC C++ tools and Windows SDK. If detection picks an incomplete installation, initialize a working Build Tools installation explicitly.
-- Linux CI installs `libgtk-3-dev`, `gcc-mingw-w64`, and `pkg-config`; consult the workflow before changing platform setup.
+- Linux CI installs `libgtk-3-dev`, `gcc-mingw-w64`, and `pkg-config`. Consult the workflow before changing platform setup. The Linux build embeds a windows-gnu hook linked with the toolchain's lld (see `.cargo/config.toml` and the [integration contract](docs/architecture/integration.md)).
 - For a development preview, use a dedicated directory outside the repository, for example `cargo run --locked -- --appdata ../mint-maintained-dev-data`. Do not add a real game path or credentials merely to populate a UI demo.
 - A fresh config can automatically discover the real game even with `--appdata`. For UI-only demos, clear the isolated config's game path and avoid installation, uninstall, launch, and self-update actions. Report headless, visible-desktop, and in-game validation separately.
 - For production Rust, dependency, or build-configuration changes, run the CI checks before a requested commit or PR:
