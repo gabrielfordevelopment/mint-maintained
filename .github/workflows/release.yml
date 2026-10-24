@@ -65,6 +65,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev gcc-mingw-w64 pkg-config
       - name: Install Rust
         run: rustup show
+      - name: Link the Linux build's hook with lld
+        if: runner.os == 'Linux'
+        # The distribution's MinGW GCC honors -fuse-ld=lld only through this file name and
+        # otherwise falls back to GNU ld. See .cargo/config.toml.
+        run: sudo ln -sf "$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld" /usr/bin/x86_64-w64-mingw32-ld.lld
       - uses: Swatinem/rust-cache@v2
       - name: Build release
         run: cargo build --locked --profile dist --target ${{ matrix.target }}
