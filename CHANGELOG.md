@@ -4,9 +4,11 @@
 
 ## [Unreleased] - ReleaseDate
 
+## [0.5.5] - 2026-10-24
+
+- Improve diagnostics for crashes and failures. Logs are written immediately and record panics, so `mint.log` and `mint_hook.log` keep their last entries even if the app or game stops unexpectedly. The game hook logs each startup step and the reason it failed, and a hook startup failure no longer closes the game. Logs no longer contain provider tokens or your user name in file paths. Reinstall mods after updating to apply the updated hook.
 - Make the application update dialog safer and clearer: an accidental Escape or click outside no longer cancels a running download, the close button explicitly cancels and keeps the result visible, the heading shows your current version, and a failed update offers Retry.
 - Rename the footer's Check updates button to Check mod updates, and explain what to do in an empty profile or when no game installation is selected.
-- Improve diagnostics for crashes and failures. Logs are written immediately and record panics, so `mint.log` and `mint_hook.log` keep their last entries even if the app or game stops unexpectedly. The game hook logs each startup step and the reason it failed, and a hook startup failure no longer closes the game. Logs no longer contain provider tokens or your user name in file paths. Reinstall mods after updating to apply the updated hook.
 
 ## [0.5.4] - 2026-10-19
 
@@ -163,6 +165,7 @@ MINT Maintained features.
 
 <!-- next-url -->
 [Unreleased]: https://github.com/gabrielfordevelopment/mint-maintained/compare/master...develop
+[0.5.5]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.5.5
 [0.5.4]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.5.4
 [0.5.3]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.5.3
 [0.5.2]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.5.2
