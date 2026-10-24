@@ -145,7 +145,7 @@ fn footer_status_stays_above_buttons_in_both_themes_and_narrow_windows() {
             let details = *button_rects(&output, "Details").last().unwrap();
             let buttons: Vec<_> = [
                 "Check mod files",
-                "Check updates",
+                "Check mod updates",
                 "Uninstall mods",
                 "Install mods",
                 "Open settings",
@@ -182,7 +182,7 @@ async fn update_scope_popup_closes_outside_and_single_mod_check_keeps_profile() 
         .mods
         .push(ModOrGroup::Individual(mod_config(&spec.url)));
     let before = (**test.app.state.mod_data).clone();
-    test.full_button("Check updates", false);
+    test.full_button("Check mod updates", false);
     assert!(!button_rects(&test.full_frame(vec![]), "Current profile").is_empty());
     test.full_click(egui::pos2(15.0, 200.0), false);
     assert!(button_rects(&test.full_frame(vec![]), "Current profile").is_empty());
@@ -206,4 +206,33 @@ async fn update_scope_popup_closes_outside_and_single_mod_check_keeps_profile() 
     assert_eq!(report.failures.len(), 1);
     assert!(report.failures[0].reason.contains("Settings"));
     assert_eq!(**test.app.state.mod_data, before);
+}
+
+#[tokio::test]
+async fn first_run_explains_empty_profile_and_missing_game_installation() {
+    let mut test = TestApp::new();
+    test.full_frame(vec![]);
+    let output = test.full_frame(vec![]);
+    text_rect(
+        &output,
+        "This profile has no mods yet. Paste a mod.io link, URL or file path into Add mod, or drop .pak files onto this window.",
+    );
+    text_rect(
+        &output,
+        "Select your DRG installation in Settings to install mods.",
+    );
+
+    test.app
+        .state
+        .mod_data
+        .get_active_profile_mut()
+        .mods
+        .push(ModOrGroup::Individual(mod_config(
+            "https://example.com/a.pak",
+        )));
+    let output = test.full_frame(vec![]);
+    assert!(!output.shapes.iter().any(|shape| matches!(
+        &shape.shape,
+        egui::Shape::Text(text) if text.galley.text().starts_with("This profile has no mods")
+    )));
 }

@@ -34,4 +34,3 @@ mint_lib = { path = "../mint_lib" }
 bitflags = "2.9.3"
 widestring = "1.2.0"
 tokio = { workspace = true, features = ["full"] }
-tracing-appender = "0.2.3"

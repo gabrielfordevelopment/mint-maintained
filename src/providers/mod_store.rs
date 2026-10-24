@@ -24,6 +24,8 @@ impl ModStore {
         cache_path: P,
         parameters: &HashMap<String, HashMap<String, String>>,
     ) -> Result<Self, ProviderError> {
+        // Provider parameters are credentials (e.g. the mod.io OAuth token); keep them out of logs.
+        mint_lib::redaction::register_secrets(parameters.values().flat_map(HashMap::values));
         let mut providers = HashMap::new();
         for prov in Self::get_provider_factories() {
             let params = parameters.get(prov.id).cloned().unwrap_or_default();
@@ -62,6 +64,7 @@ impl ModStore {
         provider_factory: &ProviderFactory,
         parameters: &HashMap<String, String>,
     ) -> Result<(), ProviderError> {
+        mint_lib::redaction::register_secrets(parameters.values());
         let provider = (provider_factory.new)(parameters)?;
         self.providers
             .write()
@@ -75,6 +78,7 @@ impl ModStore {
         provider_factory: &ProviderFactory,
         parameters: &HashMap<String, String>,
     ) -> Result<(), ProviderError> {
+        mint_lib::redaction::register_secrets(parameters.values());
         let provider = (provider_factory.new)(parameters)?;
         provider.check().await?;
         self.providers
