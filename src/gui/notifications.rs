@@ -212,9 +212,8 @@ impl Notifications {
         }
         if let Some(details) = &self.details {
             let mut open = true;
-            egui::Window::new("Notification details")
+            super::dialog("Notification details", ctx, [520.0, 280.0])
                 .open(&mut open)
-                .default_size([520.0, 280.0])
                 .show(ctx, |ui| {
                     if let Some(report) = &self.details_report {
                         retry = super::updates::report_ui(ui, report, can_retry);

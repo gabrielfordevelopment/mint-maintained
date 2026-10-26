@@ -26,6 +26,7 @@ impl SortBy {
             SortBy::Provider => "Provider",
             SortBy::RequiredStatus => "Is Required",
             SortBy::ApprovalCategory => "Approval",
+            SortBy::LastUpdated => "Last updated",
         }
     }
 }
@@ -58,45 +59,48 @@ impl App {
 
         let mut open = true;
         let mut check = false;
-        egui::Window::new(format!("Configure {} provider", window.factory.id))
-            .open(&mut open)
-            .resizable(false)
-            .show(ctx, |ui| {
-                ui.add_enabled_ui(window.check_rid.is_none(), |ui| {
-                    egui::Grid::new("grid").num_columns(2).show(ui, |ui| {
-                        for p in window.factory.parameters {
-                            if let Some(link) = p.link {
-                                ui.hyperlink_to(p.name, link).on_hover_text(p.description);
-                            } else {
-                                ui.label(p.name).on_hover_text(p.description);
-                            }
-                            let res = ui.add(inputs::bordered(
-                                egui::TextEdit::singleline(
-                                    window.parameters.entry(p.id.to_string()).or_default(),
-                                )
-                                .password(true)
-                                .desired_width(200.0),
-                            ));
-                            if is_committed(&res) {
-                                check = true;
-                            }
-                            ui.end_row();
+        dialog(
+            format!("Configure {} provider", window.factory.id),
+            ctx,
+            [380.0, 140.0],
+        )
+        .open(&mut open)
+        .show(ctx, |ui| {
+            ui.add_enabled_ui(window.check_rid.is_none(), |ui| {
+                egui::Grid::new("grid").num_columns(2).show(ui, |ui| {
+                    for p in window.factory.parameters {
+                        if let Some(link) = p.link {
+                            ui.hyperlink_to(p.name, link).on_hover_text(p.description);
+                        } else {
+                            ui.label(p.name).on_hover_text(p.description);
                         }
-                    });
-
-                    ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
-                        if ui.button("Save").clicked() {
+                        let res = ui.add(inputs::bordered(
+                            egui::TextEdit::singleline(
+                                window.parameters.entry(p.id.to_string()).or_default(),
+                            )
+                            .password(true)
+                            .desired_width(200.0),
+                        ));
+                        if is_committed(&res) {
                             check = true;
                         }
-                        if window.check_rid.is_some() {
-                            ui.spinner();
-                        }
-                        if let Some(error) = &window.check_error {
-                            ui.colored_label(ui.visuals().error_fg_color, error);
-                        }
-                    });
+                        ui.end_row();
+                    }
+                });
+
+                ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
+                    if ui.button("Save").clicked() {
+                        check = true;
+                    }
+                    if window.check_rid.is_some() {
+                        ui.spinner();
+                    }
+                    if let Some(error) = &window.check_error {
+                        ui.colored_label(ui.visuals().error_fg_color, error);
+                    }
                 });
             });
+        });
         if !open {
             self.window_provider_parameters = None;
         } else if check {
@@ -120,13 +124,12 @@ impl App {
         let mut check_update = false;
         let mut view_update = false;
         let mut notifications_changed = false;
+        let mut mod_list_changed = false;
         if let Some(window) = &mut self.settings_window {
             let mut open = true;
             let mut try_save = false;
-            egui::Window::new("Settings")
+            dialog("Settings", ctx, [560.0, 640.0])
                 .open(&mut open)
-                .resizable(false)
-                .default_height((ctx.screen_rect().height() - 64.0).clamp(160.0, 640.0))
                 .show(ctx, |ui| {
                     egui::Grid::new("grid").num_columns(2).striped(true).show(ui, |ui| {
                         let mut job = LayoutJob::default();
@@ -234,6 +237,47 @@ impl App {
                         notifications_changed = ui.checkbox(&mut self.state.config.show_notifications, "Show notifications").changed();
                         ui.end_row();
 
+                        let list = &mut self.state.config.mod_list;
+                        let before = list.clone();
+                        ui.label("Mod list view:");
+                        icons::segmented(ui, "settings-mod-list-view", &mut list.view, &mod_list::VIEW_SEGMENTS);
+                        ui.end_row();
+                        ui.label("Thumbnails:");
+                        ui.vertical(|ui| {
+                            ui.checkbox(&mut list.download_thumbnails, "Download mod.io thumbnails")
+                                .on_hover_text("When off, no thumbnail is downloaded and rows show placeholders.");
+                            ui.add_enabled_ui(list.download_thumbnails, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.checkbox(&mut list.compact_thumbnails, "In compact view");
+                                    ui.checkbox(&mut list.normal_thumbnails, "In normal view");
+                                });
+                            });
+                        });
+                        ui.end_row();
+                        ui.label("Load priority:");
+                        let mut show_priority = list.priority == PriorityDisplay::Always;
+                        if ui.checkbox(&mut show_priority, "Show in rows")
+                            .on_hover_text("When off, edit the priority in the details panel.")
+                            .changed()
+                        {
+                            list.priority = if show_priority { PriorityDisplay::Always } else { PriorityDisplay::Hidden };
+                        }
+                        ui.end_row();
+                        ui.label("Row striping:");
+                        ui.horizontal(|ui| {
+                            for option in RowStriping::ALL {
+                                ui.radio_value(&mut list.striping, option, option.as_str());
+                            }
+                        });
+                        ui.end_row();
+                        ui.label("Row lines:");
+                        ui.checkbox(&mut list.row_lines, "Show lines between rows");
+                        ui.end_row();
+                        ui.label("Tags:");
+                        ui.checkbox(&mut list.show_tags, "Show mod.io tags in rows");
+                        ui.end_row();
+                        mod_list_changed = *list != before;
+
                         ui.label("Mod providers:");
                         ui.end_row();
 
@@ -299,7 +343,7 @@ impl App {
                 self.settings_window = None;
             }
         }
-        if notifications_changed {
+        if notifications_changed || mod_list_changed {
             self.report_save(self.state.config.save());
         }
         if check_update {

@@ -18,16 +18,18 @@ struct Request {
 #[derive(Default)]
 pub(super) struct InstallationStatus {
     requested: Option<Request>,
-    pending: Option<mpsc::Receiver<(String, HashMap<String, String>)>>,
+    pending: Option<mpsc::Receiver<Comparison>>,
     last_checked: Option<Instant>,
     pub summary: String,
     pub rows: HashMap<String, String>,
+    /// The active profile is known to differ from the installed mods.
+    pub needs_install: bool,
 }
 
-fn compare(
-    installed: InstalledState,
-    desired: &[(String, Option<InstalledMod>)],
-) -> (String, HashMap<String, String>) {
+/// Summary, per-mod hints, and whether installing would change the game.
+type Comparison = (String, HashMap<String, String>, bool);
+
+fn compare(installed: InstalledState, desired: &[(String, Option<InstalledMod>)]) -> Comparison {
     let mut rows = HashMap::new();
     let known = match installed {
         InstalledState::NotInstalled => {
@@ -40,10 +42,15 @@ fn compare(
             return (
                 "No mods installed. Click Install mods to apply this profile.".into(),
                 rows,
+                !desired.is_empty(),
             );
         }
         InstalledState::Unknown(reason) => {
-            return (format!("Installation status unknown. {reason}"), rows);
+            return (
+                format!("Installation status unknown. {reason}"),
+                rows,
+                false,
+            );
         }
         InstalledState::Known(mods) => mods,
     };
@@ -76,14 +83,16 @@ fn compare(
         }
     }
     let desired_mods: Vec<_> = desired.iter().filter_map(|(_, m)| m.clone()).collect();
+    let differs = known != desired_mods;
     let summary = if unresolved {
         "Some mod versions are unknown. Check for updates before installing."
-    } else if known != desired_mods {
+    } else if differs {
         "Profile changes are not installed. Click Install mods to apply them."
     } else {
         "Selected profile matches the installed mods."
     };
-    (summary.into(), rows)
+    // Unknown versions cannot be compared reliably, so they do not claim a pending change.
+    (summary.into(), rows, differs && !unresolved)
 }
 
 impl InstallationStatus {
@@ -91,6 +100,7 @@ impl InstallationStatus {
         let Some(game) = &state.config.drg_pak_path else {
             self.summary.clear();
             self.rows.clear();
+            self.needs_install = false;
             self.requested = None;
             self.pending = None;
             return;
@@ -103,6 +113,7 @@ impl InstallationStatus {
             Err(error) => {
                 self.summary = error.to_string();
                 self.rows.clear();
+                self.needs_install = false;
                 self.requested = None;
                 self.pending = None;
                 return;
@@ -126,16 +137,18 @@ impl InstallationStatus {
         };
         if let Some(rx) = &self.pending {
             match rx.try_recv() {
-                Ok((summary, rows)) => {
+                Ok((summary, rows, needs_install)) => {
                     if self.requested.as_ref() == Some(&request) {
                         self.summary = summary;
                         self.rows = rows;
+                        self.needs_install = needs_install;
                     }
                     self.pending = None;
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.pending = None;
                     self.summary = "Installation status could not be checked.".into();
+                    self.needs_install = false;
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
             }
@@ -143,6 +156,7 @@ impl InstallationStatus {
         let changed = self.requested.as_ref() != Some(&request);
         if changed {
             self.rows.clear();
+            self.needs_install = false;
             self.summary = "Checking installed mod versions...".into();
         }
         if !busy
@@ -199,6 +213,7 @@ mod tests {
         let changed = compare(installed.clone(), &reversed);
         assert!(changed.0.contains("not installed"));
         assert!(changed.1.is_empty());
+        assert!(changed.2, "reordering needs installation");
         let mut modified = first;
         modified.local_stamp = Some((11, 101));
         let changed = compare(
@@ -209,11 +224,10 @@ mod tests {
             ],
         );
         assert!(changed.1["first"].contains("not installed"));
-        assert!(
-            compare(installed, &[("missing".into(), None)])
-                .0
-                .contains("unknown")
-        );
+        assert!(changed.2);
+        let unknown = compare(installed, &[("missing".into(), None)]);
+        assert!(unknown.0.contains("unknown"));
+        assert!(!unknown.2, "unknown versions do not claim a pending change");
     }
 
     #[test]
@@ -240,9 +254,11 @@ mod tests {
         );
         assert!(both.0.contains("matches"));
         assert!(both.1.is_empty());
+        assert!(!both.2);
         let result = compare(InstalledState::Known(vec![older]), &desired);
         assert!(result.0.contains("not installed"));
         assert!(result.1["latest"].contains("not installed"));
+        assert!(result.2);
         assert!(
             compare(InstalledState::Known(vec![entry]), &[])
                 .0
@@ -256,10 +272,16 @@ mod tests {
             .0
             .contains("unknown")
         );
+        let nothing = compare(InstalledState::NotInstalled, &desired);
+        assert!(nothing.0.contains("No mods installed"));
+        assert!(nothing.2);
+        assert!(!compare(InstalledState::NotInstalled, &[]).2);
         assert!(
-            compare(InstalledState::NotInstalled, &desired)
-                .0
-                .contains("No mods installed")
+            !compare(
+                InstalledState::Unknown("Legacy installation".into()),
+                &desired
+            )
+            .2
         );
     }
 }

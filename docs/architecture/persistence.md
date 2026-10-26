@@ -5,10 +5,11 @@
 | Data | Owner | Contract |
 | --- | --- | --- |
 | Application directories | [src/lib.rs](../../src/lib.rs) | Existing legacy `drg-mod-integration` directories take precedence over `mint`; `--appdata` selects separate config/cache/data directories. |
-| `config.json` | [src/state/mod.rs](../../src/state/mod.rs) | Provider parameters, game path, theme, and sorting settings; legacy and versioned readers. |
+| `config.json` | [src/state/mod.rs](../../src/state/mod.rs) | Provider parameters, game path, theme, sorting and mod list view settings. Legacy and versioned readers. |
 | `profiles.json`, `mod_data.json` | [src/state/mod.rs](../../src/state/mod.rs) | Legacy profiles migrate into ordered individual/group entries. Current mod data takes precedence over the retained legacy backup. |
+| `window.ron` | eframe, configured in [src/gui/mod.rs](../../src/gui/mod.rs) | Main window size, position and maximized state only. Disposable UI state in the data directory, rewritten by eframe on exit and periodically. |
 | JSON writes | [src/state/config.rs](../../src/state/config.rs) | Serialize to a temporary file in the destination directory, then persist it over the destination. |
-| Settings enums | [src/state/settings.rs](../../src/state/settings.rs) | Theme and sorting wire names remain unchanged; GUI conversion/rendering consumes these types. |
+| Settings enums | [src/state/settings.rs](../../src/state/settings.rs) | Theme and sorting wire names remain unchanged; GUI conversion/rendering consumes these types. `SortBy::LastUpdated` is an additive variant: older binaries reject a config that has it selected, without rewriting the file. |
 | Profile/group edits | [src/state/edits.rs](../../src/state/edits.rs) | Validate mutations on a candidate copy before replacing state; preserve shared group references and reject stale confirmed deletions. |
 | `cache.json` and blobs | [src/providers/cache.rs](../../src/providers/cache.rs), [ModStore](../../src/providers/mod_store.rs) | Versioned provider metadata, provider type tags, numeric mod/file keys, and SHA-256-addressed downloaded blobs. |
 
@@ -32,6 +33,10 @@ The source types and version declarations are authoritative; do not duplicate sc
 ## Migration procedure and evidence
 
 `Config.show_notifications` is an additive boolean in the existing config format. Missing fields in legacy and versioned settings default to true; explicit false survives save/reload. Invalid values fail loading without replacing the source. Older binaries may discard this field when saving. The Settings checkbox saves immediately using the existing writer and reports save failures through footer status.
+
+`Config.mod_list` is an additive object (`ModListSettings`) in the existing config format. A missing object or missing fields use the documented defaults (Compact view, thumbnails in Normal view only, downloads on, priority shown in rows, tags shown, Medium row striping, no row lines, default panel width). Unknown enum values or wrong types fail loading without replacing the source. Older binaries may discard the object when saving. These are presentation settings and never change mod data.
+
+`ModioMod.details` is an optional additive field in `cache.json` holding the logo thumbnail URL, summary and author. Caches without it load unchanged and serialize without the field. Older binaries ignore it and may drop it when saving. Startup backfills missing details in batches of 100 IDs, applies each successful batch, saves partial successes and leaves failed entries for the next start. Details never affect resolution or load order. Downloaded thumbnail images live in `cache/thumbnails`, a disposable cache trimmed to 64 MiB.
 
 New and explicitly arranged profiles contain a group section followed by standalone mods. `ModProfile` owns mixed-order detection and root insertion bounds; `state/edits.rs` enforces the bounds for moves and ungrouping. Creating or attaching groups appends them to the group section; resolved imports prepend standalone mods after the groups, in input order. Older layouts, including standalone-first profiles from previous releases, remain valid and retain their exact order on initialization, serialization and cancellation. Structural group edits and dragging require an explicit Arrange groups confirmation first. Arrangement uses a stable partition of that profile only, preserves group contents and all other profiles, and warns that load order can change. Its prepared snapshot rejects stale confirmation. No schema field or automatic startup migration is needed: the saved order determines whether arrangement is still required. Copying an older layout preserves it and its confirmation requirement.
 

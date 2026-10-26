@@ -1,4 +1,4 @@
-use super::sorting::sorted_mod_indices;
+use super::sorting::{sorted_mod_indices, sorted_mod_indices_with_dates};
 use super::*;
 mod app_update;
 mod disclosure;
@@ -6,12 +6,15 @@ mod drag_drop;
 mod editing;
 mod group_colors;
 mod history;
+mod interaction_fuzz;
+mod mod_list_views;
 mod notifications;
 mod sorting_controls;
 mod unicode_text;
 mod updates;
 use crate::providers::ModResolution;
 use crate::state::ModGroup;
+use mint_lib::mod_info::ModioTags;
 
 fn mod_config(name: &str) -> ModConfig {
     ModConfig {
@@ -107,10 +110,16 @@ fn all_sort_categories_support_both_directions_and_missing_metadata() {
         for direction in [false, true] {
             let config = sorting(category, direction);
             let calls = std::cell::Cell::new(0);
-            let order = sorted_mod_indices([Some(&zulu), Some(&alpha)], Some(&config), |spec| {
-                calls.set(calls.get() + 1);
-                metadata(spec)
-            });
+            // alpha was updated earlier, so it leads in the base (ascending) order.
+            let order = sorted_mod_indices_with_dates(
+                [Some(&zulu), Some(&alpha)],
+                Some(&config),
+                |spec| {
+                    calls.set(calls.get() + 1);
+                    metadata(spec)
+                },
+                |spec| Some(if spec.url == "alpha" { 1 } else { 2 }),
+            );
             assert_eq!(
                 order,
                 if direction { [0, 1] } else { [1, 0] },
@@ -171,13 +180,15 @@ fn adjacent_mods_sort_with_one_missing_metadata() {
             ["zulu", "alpha"],
             ["alpha", "zulu"],
         ),
+        (SortBy::LastUpdated, ["zulu", "alpha"], ["alpha", "zulu"]),
     ] {
         for (direction, expected) in [(false, normal), (true, reversed)] {
             for mods in [[&known, &missing], [&missing, &known]] {
-                let order = sorted_mod_indices(
+                let order = sorted_mod_indices_with_dates(
                     mods.map(Some),
                     Some(&sorting(category, direction)),
                     |spec| (spec.url == known.spec.url).then(|| metadata.clone()),
+                    |spec| (spec.url == known.spec.url).then_some(10),
                 );
                 let sorted_urls: Vec<_> = order
                     .iter()
@@ -211,6 +222,7 @@ fn adjacent_mods_sort_with_both_missing_metadata() {
             ["alpha", "zulu"],
             ["alpha", "zulu"],
         ),
+        (SortBy::LastUpdated, ["alpha", "zulu"], ["alpha", "zulu"]),
     ] {
         for (direction, expected) in [(false, normal), (true, reversed)] {
             for mods in [[&alpha, &zulu], [&zulu, &alpha]] {
@@ -511,6 +523,8 @@ fn svg_icons_render_and_refresh_cached_textures_at_display_scale() {
         Icon::Undo,
         Icon::Redo,
         Icon::Update,
+        Icon::ViewList,
+        Icon::ViewAgenda,
     ];
     for scale in [1.0, 1.5, 2.0] {
         context.set_pixels_per_point(scale);
@@ -633,7 +647,9 @@ fn footer_centers_text_and_icons_without_increasing_button_height() {
 }
 
 #[test]
-fn settings_width_is_stable_when_notices_are_expanded_and_collapsed() {
+fn settings_size_is_stable_when_notices_are_expanded_and_collapsed() {
+    // Tall enough to show every Settings row. Short windows are covered by
+    // `settings_stays_inside_short_main_windows`.
     for theme in [egui::ThemePreference::Light, egui::ThemePreference::Dark] {
         let mut test = TestApp::new();
         test.app.settings_window = Some(WindowSettings::new(&test.app.state));
@@ -645,7 +661,7 @@ fn settings_width_is_stable_when_notices_are_expanded_and_collapsed() {
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
-                        egui::vec2(1000.0, 800.0),
+                        egui::vec2(1000.0, 1200.0),
                     )),
                     events,
                     ..Default::default()
@@ -681,10 +697,10 @@ fn settings_width_is_stable_when_notices_are_expanded_and_collapsed() {
                 (current.width() - initial.width()).abs() <= 1.0,
                 "{theme:?}, expanded {expanded}: initial {initial:?}, current {current:?}"
             );
-            assert_eq!(
-                current.height() > initial.height() + 100.0,
-                expanded,
-                "{theme:?}: initial {initial:?}, current {current:?}"
+            // Dialogs keep their size and scroll. Expanding notices must not resize the window.
+            assert!(
+                (current.height() - initial.height()).abs() <= 1.0,
+                "{theme:?}, expanded {expanded}: initial {initial:?}, current {current:?}"
             );
         }
     }

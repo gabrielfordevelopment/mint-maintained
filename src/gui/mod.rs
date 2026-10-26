@@ -1,7 +1,9 @@
 mod app_update;
+mod details;
 mod diagnostics;
 mod drag_drop;
 mod editing;
+mod filters;
 mod find_string;
 mod fonts;
 mod group_colors;
@@ -22,6 +24,7 @@ mod notifications;
 mod request_counter;
 mod settings;
 mod sorting;
+mod thumbnails;
 mod toggle_switch;
 mod updates;
 
@@ -51,7 +54,7 @@ use eframe::{
 };
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use mint_lib::error::ResultExt as _;
-use mint_lib::mod_info::{ModioTags, RequiredStatus};
+use mint_lib::mod_info::RequiredStatus;
 use mint_lib::update::GitHubRelease;
 use strum::IntoEnumIterator;
 use tokio::{
@@ -79,7 +82,7 @@ use message::MessageHandle;
 use request_counter::{RequestCounter, RequestID};
 
 use self::toggle_switch::toggle_switch;
-pub use crate::state::{GuiTheme, SortBy};
+pub use crate::state::{GuiTheme, ModListView, PriorityDisplay, RowStriping, SortBy};
 use settings::{WindowProviderParameters, WindowSettings};
 
 pub fn gui(dirs: Dirs, args: Option<Vec<String>>) -> Result<(), MintError> {
@@ -87,7 +90,12 @@ pub fn gui(dirs: Dirs, args: Option<Vec<String>>) -> Result<(), MintError> {
         viewport: egui::ViewportBuilder::default()
             .with_icon(icons::app_icon())
             .with_inner_size([900.0, 500.0])
+            .with_min_inner_size([480.0, 320.0])
             .with_drag_and_drop(true),
+        // The main window's size, position and maximized state are restored from here and
+        // clamped to the connected monitors. Kept in the data directory so `--appdata` isolates it.
+        persist_window: true,
+        persistence_path: Some(window_state_path(&dirs)),
         ..Default::default()
     };
     eframe::run_native(
@@ -124,7 +132,17 @@ impl StartupApp {
     }
 }
 
+/// eframe's window state file: only the main window geometry is stored in it.
+fn window_state_path(dirs: &Dirs) -> PathBuf {
+    dirs.data_dir.join("window.ron")
+}
+
 impl eframe::App for StartupApp {
+    /// Dialog positions and other egui UI state are not restored between sessions.
+    fn persist_egui_memory(&self) -> bool {
+        false
+    }
+
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         if let Some(app) = &mut self.app {
             app.update(ctx, frame);
@@ -198,6 +216,9 @@ pub struct App {
     groups_window: Option<groups::GroupsWindow>,
     log_window: Option<log_window::LogWindow>,
     group_views: group_view::GroupViews,
+    details: Option<details::DetailsTarget>,
+    mod_filters: filters::ModFilters,
+    thumbnails: thumbnails::Thumbnails,
 }
 
 #[derive(Default)]
@@ -275,6 +296,7 @@ impl App {
         let (tx, rx) = mpsc::channel(10);
         let state = State::init(dirs)?;
         let history = history::History::new(&state.mod_data);
+        let thumbnails = thumbnails::Thumbnails::new(state.dirs.cache_dir.join("thumbnails"));
 
         Ok(Self {
             args,
@@ -323,7 +345,29 @@ impl App {
             groups_window: None,
             log_window: None,
             group_views: Default::default(),
+            details: None,
+            mod_filters: Default::default(),
+            thumbnails,
         })
+    }
+
+    /// Fetches details missing from older caches and trims the thumbnail cache, off the UI thread.
+    fn start_metadata_maintenance(&self, ctx: &egui::Context) {
+        let store = self.state.store.clone();
+        let ctx = ctx.clone();
+        tokio::spawn(async move {
+            match store.backfill_details().await {
+                Ok(true) => ctx.request_repaint(),
+                Ok(false) => {}
+                Err(error) => warn!("Could not fetch missing mod details: {error}"),
+            }
+        });
+        let dir = self.state.dirs.cache_dir.join("thumbnails");
+        tokio::task::spawn_blocking(move || {
+            if let Err(error) = thumbnails::prune(&dir, thumbnails::MAX_CACHE_BYTES) {
+                warn!("Could not trim the thumbnail cache: {error}");
+            }
+        });
     }
 
     fn report_save(&mut self, result: Result<(), crate::state::StateError>) -> bool {
@@ -356,13 +400,16 @@ impl App {
                     .flat_map(|parameters| parameters.values().cloned()),
             );
             if self.show_error_details {
-                egui::Window::new(if report.is_some() {
-                    "Update check details"
-                } else {
-                    "Error details"
-                })
+                dialog(
+                    if report.is_some() {
+                        "Update check details"
+                    } else {
+                        "Error details"
+                    },
+                    ctx,
+                    [520.0, 280.0],
+                )
                 .open(&mut self.show_error_details)
-                .default_size([520.0, 280.0])
                 .show(ctx, |ui| {
                     if let Some(report) = report {
                         retry = updates::report_ui(ui, report, enabled);
@@ -402,7 +449,7 @@ impl App {
         let mut to_remove = vec![];
         for profile in &self.open_profiles.clone() {
             let mut open = true;
-            egui::Window::new(format!("Profile \"{profile}\""))
+            dialog(format!("Profile \"{profile}\""), ctx, [640.0, 420.0])
                 .open(&mut open)
                 .show(ctx, |ui| {
                     self.ui_profile(ui, profile);
@@ -463,6 +510,7 @@ impl eframe::App for App {
             ctx.memory_mut(|m| m.options.theme_preference = theme);
 
             message::CheckUpdates::send(self, ctx, false);
+            self.start_metadata_maintenance(ctx);
         }
 
         // message handling
@@ -482,6 +530,7 @@ impl eframe::App for App {
         }
 
         // begin draw
+        self.thumbnails.poll(ctx);
         self.history_shortcuts(ctx);
         let busy = self.editing_busy();
         self.installation_status.poll(&self.state, ctx, busy);
@@ -534,7 +583,14 @@ impl eframe::App for App {
                         }
 
                         ui.add_enabled_ui(self.state.config.drg_pak_path.is_some(), |ui| {
-                            let mut button = ui.button("Install mods");
+                            // Highlighted while the active profile differs from the installed mods.
+                            let pending = self.installation_status.needs_install;
+                            let mut button = icons::primary_button(ui, "Install mods", pending);
+                            if pending {
+                                button = button.on_hover_text(
+                                    "Profile changes are not installed yet. Click to apply them.",
+                                );
+                            }
                             if self.state.config.drg_pak_path.is_none() {
                                 button = button.on_disabled_hover_text(
                                     "DRG install not found. Configure it in the settings menu.",
@@ -680,6 +736,7 @@ impl eframe::App for App {
                 }
             });
         });
+        self.show_details_panel(ctx);
         egui::CentralPanel::default().show(ctx, |ui| {
             if self.editing_busy() || self.delete_confirmation.is_some() {
                 ui.disable();
@@ -797,15 +854,12 @@ impl eframe::App for App {
 
             ui.horizontal(|ui| {
                 self.ui_sort_controls(ui);
+                ui.add_space(16.);
+                self.ui_view_controls(ui);
 
                 ui.add_space(16.);
+                let any_matches = self.search_has_matches(&profile, &self.search_string);
                 let search_string = &mut self.search_string;
-                let any_matches = self.state.mod_data.any_mod(&profile, |mc, _| {
-                    self.state.store.get_mod_info(&mc.spec).map_or_else(
-                        || find_string::contains_case_insensitive(&mc.spec.url, search_string),
-                        |info| find_string::contains_case_insensitive(&info.name, search_string),
-                    )
-                });
 
                 let mut text_edit = egui::TextEdit::singleline(search_string)
                     .hint_text("Search")
@@ -834,6 +888,7 @@ impl eframe::App for App {
                     self.focus_search = false;
                 }
             });
+            self.ui_filter_chips(ui, &profile);
             ui.add_space(4.);
 
             if self
@@ -905,6 +960,27 @@ impl eframe::App for App {
             self.log_window = Some(window);
         }
     }
+}
+
+/// Shared dialog behavior: movable and resizable inside the main window, never collapsed to
+/// its title, and scrolling instead of being cut off when the main window is smaller.
+/// Confirmation prompts use `egui::Modal` instead.
+fn dialog<'a>(
+    title: impl Into<egui::WidgetText>,
+    ctx: &egui::Context,
+    default_size: [f32; 2],
+) -> egui::Window<'a> {
+    let available = ctx.screen_rect().size() - egui::vec2(32.0, 64.0);
+    egui::Window::new(title)
+        .collapsible(false)
+        .resizable(true)
+        .constrain(true)
+        .vscroll(true)
+        .min_size([240.0, 120.0])
+        .default_size([
+            default_size[0].min(available.x).max(240.0),
+            default_size[1].min(available.y).max(120.0),
+        ])
 }
 
 fn is_committed(res: &egui::Response) -> bool {
