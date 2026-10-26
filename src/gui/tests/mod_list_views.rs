@@ -1438,3 +1438,206 @@ fn keyboard_focus_on_a_mod_row_is_visible_and_enter_shows_its_details() {
     test.frame(vec![]);
     assert_eq!(test.app.details.clone().unwrap().url, alpha.spec.url);
 }
+
+#[test]
+fn arrow_keys_step_the_selection_through_shown_mods() {
+    let mut test = TestApp::new();
+    let [alpha, bravo, charlie] = three_mods(&mut test);
+    let member = test.local_mod("member.pak");
+    let hidden = test.local_mod("hidden.pak");
+    for (name, mods) in [("Open", vec![member.clone()]), ("Closed", vec![hidden])] {
+        test.app.state.mod_data.groups.insert(
+            name.into(),
+            ModGroup {
+                mods,
+                ..Default::default()
+            },
+        );
+    }
+    let profile = &mut test.app.state.mod_data.get_active_profile_mut().mods;
+    for name in ["Closed", "Open"] {
+        profile.insert(
+            0,
+            ModOrGroup::Group {
+                group_name: name.into(),
+                enabled: true,
+            },
+        );
+    }
+    test.open_group("Open");
+    let key = |key: egui::Key| egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let selected = |test: &TestApp| test.app.details.as_ref().map(|d| d.url.clone());
+
+    // Without a selection the keys do nothing.
+    test.frame(vec![key(egui::Key::ArrowDown)]);
+    assert_eq!(selected(&test), None);
+
+    let output = test.frame(vec![]);
+    test.click(egui::pos2(
+        700.0,
+        text_rect(&output, "member.pak").center().y,
+    ));
+    assert_eq!(selected(&test), Some(member.spec.url.clone()));
+    // Members of the open group, then the standalone mods. The closed group is skipped.
+    for expected in [&alpha, &bravo, &charlie, &charlie] {
+        test.frame(vec![key(egui::Key::ArrowDown)]);
+        assert_eq!(selected(&test), Some(expected.spec.url.clone()));
+    }
+    for expected in [&bravo, &alpha, &member, &member] {
+        test.frame(vec![key(egui::Key::ArrowUp)]);
+        assert_eq!(selected(&test), Some(expected.spec.url.clone()));
+    }
+
+    // Sorting and search change the order and the shown mods.
+    test.app.update_sorting_config(Some(SortBy::Name), false);
+    test.app.search_string = ".pak".into();
+    let output = test.frame(vec![]);
+    test.click(egui::pos2(
+        700.0,
+        text_rect(&output, "charlie.pak").center().y,
+    ));
+    test.frame(vec![key(egui::Key::ArrowUp)]);
+    assert_eq!(selected(&test), Some(bravo.spec.url.clone()));
+    test.app.search_string = "a".into();
+    test.frame(vec![]);
+    test.frame(vec![key(egui::Key::ArrowDown)]);
+    assert_eq!(
+        selected(&test),
+        Some(charlie.spec.url.clone()),
+        "bravo is hidden, so Down goes on to charlie"
+    );
+}
+
+#[test]
+fn keyboard_focus_follows_the_selection_when_stepping_rows() {
+    let mut test = TestApp::new();
+    let [alpha, bravo, _] = three_mods(&mut test);
+    let key = |key: egui::Key| egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    test.frame(vec![]);
+    test.frame(vec![key(egui::Key::Tab)]);
+    test.frame(vec![key(egui::Key::Enter)]);
+    assert_eq!(test.app.details.clone().unwrap().url, alpha.spec.url);
+    test.frame(vec![key(egui::Key::ArrowDown)]);
+    test.frame(vec![]);
+    assert_eq!(test.app.details.clone().unwrap().url, bravo.spec.url);
+    // Enter now activates bravo's row, so the focus moved with the selection.
+    test.app.details = None;
+    test.frame(vec![key(egui::Key::Enter)]);
+    test.frame(vec![]);
+    assert_eq!(test.app.details.clone().unwrap().url, bravo.spec.url);
+}
+
+#[test]
+fn escape_in_the_search_box_clears_the_search_and_keeps_the_details_open() {
+    let mut test = TestApp::new();
+    let [alpha, ..] = three_mods(&mut test);
+    test.app.details = Some(crate::gui::details::DetailsTarget {
+        target: crate::state::edits::ListTarget {
+            profile: "default".into(),
+            group: None,
+            index: 0,
+        },
+        url: alpha.spec.url.clone(),
+    });
+    let escape = || egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    test.full_frame(vec![]);
+    test.app.focus_search = true;
+    test.full_frame(vec![]);
+    test.full_frame(vec![egui::Event::Text("bra".into())]);
+    test.full_frame(vec![]);
+    assert_eq!(test.app.search_string, "bra");
+    test.full_frame(vec![escape()]);
+    test.full_frame(vec![]);
+    assert!(
+        test.app.search_string.is_empty(),
+        "Escape clears the search"
+    );
+    assert!(test.app.details.is_some(), "the details panel stays open");
+    // With nothing focused, Escape closes the panel.
+    test.full_frame(vec![escape()]);
+    assert!(test.app.details.is_none());
+}
+
+#[test]
+fn emptying_the_list_while_its_scroll_bar_is_dragged_does_not_break_scrolling() {
+    let mut test = TestApp::new();
+    let mods: Vec<_> = (0..40)
+        .map(|index| test.local_mod(&format!("mod{index:02}.pak")))
+        .collect();
+    test.app.state.mod_data.get_active_profile_mut().mods =
+        mods.into_iter().map(ModOrGroup::Individual).collect();
+    let run = |test: &mut TestApp, events: Vec<egui::Event>| {
+        test.context.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 300.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| test.app.ui_profile(ui, "default"));
+            },
+        )
+    };
+    run(&mut test, vec![]);
+    // The floating scroll bar sits at the list's right edge.
+    let bar = egui::pos2(800.0 - 12.0, 60.0);
+    run(&mut test, vec![egui::Event::PointerMoved(bar)]);
+    for _ in 0..5 {
+        run(&mut test, vec![]);
+    }
+    run(
+        &mut test,
+        vec![egui::Event::PointerButton {
+            pos: bar,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    // A search without matches empties the list while the bar is still held and fading out.
+    test.app.search_string = "no such mod".into();
+    for step in 1..=8 {
+        run(
+            &mut test,
+            vec![egui::Event::PointerMoved(
+                bar + egui::vec2(0.0, 10.0 * step as f32),
+            )],
+        );
+    }
+    run(
+        &mut test,
+        vec![egui::Event::PointerButton {
+            pos: bar,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    test.app.search_string.clear();
+    let output = run(&mut test, vec![]);
+    assert!(
+        rendered(&output, "mod00.pak"),
+        "the list scrolls and renders normally again"
+    );
+}

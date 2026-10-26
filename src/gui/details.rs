@@ -30,6 +30,19 @@ pub(super) fn content_width(ui: &Ui) -> f32 {
         .max(0.0)
 }
 
+const FOCUS_ID: &str = "mod-list-focus-last-frame";
+
+/// Records which control has keyboard focus at the end of the list, for the next frame.
+pub(super) fn remember_focus(ctx: &egui::Context) {
+    let focused = ctx.memory(|memory| memory.focused());
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new(FOCUS_ID), focused));
+}
+
+fn focus_last_frame(ctx: &egui::Context) -> Option<egui::Id> {
+    ctx.data(|data| data.get_temp::<Option<egui::Id>>(egui::Id::new(FOCUS_ID)))
+        .flatten()
+}
+
 /// Small uppercase title that starts a panel section.
 fn section(ui: &mut Ui, title: &str) {
     ui.add_space(14.0);
@@ -158,11 +171,12 @@ impl App {
         Some(selected)
     }
 
-    /// Escape clears the selection unless something else is using it: text entry, an open
-    /// dropdown, a confirmation or other modal, or a drag (egui consumes Escape to cancel drags).
+    /// Escape clears the selection unless something else is using it: a focused control (egui
+    /// removes focus on Escape before this runs, so the previous frame's focus is checked), an
+    /// open dropdown, a confirmation or other modal, or a drag (egui consumes Escape for drags).
     fn escape_closes_details(&self, ctx: &egui::Context) -> bool {
         self.delete_confirmation.is_none()
-            && !ctx.wants_keyboard_input()
+            && focus_last_frame(ctx).is_none()
             && !ctx.memory(|memory| memory.any_popup_open() || memory.top_modal_layer().is_some())
             && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     }

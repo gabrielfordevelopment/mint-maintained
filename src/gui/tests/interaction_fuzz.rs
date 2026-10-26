@@ -202,11 +202,18 @@ fn fuzz(seed: u64, steps: usize) {
                 );
             }
             7 => {
+                let key = [
+                    egui::Key::Escape,
+                    egui::Key::ArrowUp,
+                    egui::Key::ArrowDown,
+                    egui::Key::Tab,
+                    egui::Key::Enter,
+                ][rng.below(5) as usize];
                 run(
                     &mut test,
                     size,
                     vec![egui::Event::Key {
-                        key: egui::Key::Escape,
+                        key,
                         physical_key: None,
                         pressed: true,
                         repeat: false,

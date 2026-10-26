@@ -290,7 +290,50 @@ fn row_focus(
     }
     if response.has_focus() {
         *focused = Some(slot);
+        // Up and Down step through the mods instead of moving focus to a nearby control.
+        ui.memory_mut(|memory| {
+            memory.set_focus_lock_filter(
+                response.id,
+                egui::EventFilter {
+                    vertical_arrows: true,
+                    ..Default::default()
+                },
+            )
+        });
     }
+}
+
+/// Index in `rows` (shown mods in display order) to select after this frame's Up and Down
+/// presses. Without a focused control, or with focus on a mod row, the keys step from the
+/// selected mod, stopping at the ends. A selected mod that is not shown steps to the first or
+/// last one. Other focused controls keep the keys for egui's focus navigation.
+fn arrow_step(
+    ui: &mut Ui,
+    rows: &[(Option<String>, usize, egui::Id, egui::Rect)],
+    selected: Option<&details::DetailsTarget>,
+) -> Option<usize> {
+    let focused = ui.memory(|memory| memory.focused());
+    if focused.is_some_and(|focused| !rows.iter().any(|row| row.2 == focused)) || rows.is_empty() {
+        return None;
+    }
+    let step = ui.input_mut(|input| {
+        input.count_and_consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) as isize
+            - input.count_and_consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) as isize
+    });
+    if step == 0 {
+        return None;
+    }
+    let last = rows.len() as isize - 1;
+    let current = selected.and_then(|selected| {
+        rows.iter().position(|(group, index, ..)| {
+            group.as_deref() == selected.target.group.as_deref() && *index == selected.target.index
+        })
+    });
+    Some(match current {
+        Some(current) => (current as isize + step).clamp(0, last) as usize,
+        None if step > 0 => 0,
+        None => last as usize,
+    })
 }
 
 /// Thin separator above a row, centered in the spacing between rows.
@@ -418,6 +461,17 @@ impl App {
         // Highlight the row under the pointer, but not while dragging or while the list is locked.
         let highlight_hover = ui.is_enabled() && !egui::DragAndDrop::has_any_payload(ui.ctx());
         let selected = self.details.clone();
+        // With a mod selected, Up and Down step through the shown mods unless the keyboard
+        // belongs to something else: a focused control other than a mod row (see `arrow_step`),
+        // a dropdown, a confirmation or a drag.
+        let arrow_nav = selected
+            .as_ref()
+            .is_some_and(|selected| selected.target.profile == profile)
+            && ui.is_enabled()
+            && !ui
+                .ctx()
+                .memory(|memory| memory.any_popup_open() || memory.top_modal_layer().is_some())
+            && !egui::DragAndDrop::has_any_payload(ui.ctx());
         let is_selected = |group: Option<&str>, index: usize| {
             selected.as_ref().is_some_and(|s| {
                 s.target.profile == profile
@@ -475,6 +529,8 @@ impl App {
             row_menu: Option<(ModSpecification, bool, String)>,
             /// Slot of the row that has keyboard focus.
             focused_slot: Option<egui::Rect>,
+            /// Shown mod rows in display order, for stepping with the arrow keys.
+            nav: Vec<(Option<String>, usize, egui::Id, egui::Rect)>,
             hide_details: bool,
         }
         let mut ctx = Ctx {
@@ -493,6 +549,7 @@ impl App {
             body: None,
             selected_slot: None,
             focused_slot: None,
+            nav: Vec::new(),
             lines: Vec::new(),
             row_menu: None,
             hide_details: false,
@@ -1102,6 +1159,12 @@ impl App {
                                                     slot,
                                                     ctx.row_menu.as_ref(),
                                                 );
+                                                ctx.nav.push((
+                                                    Some(group_name.clone()),
+                                                    index,
+                                                    response.id,
+                                                    slot,
+                                                ));
                                                 if response.clicked() {
                                                     ctx.show_details =
                                                         Some((Some(group_name.clone()), index));
@@ -1331,6 +1394,7 @@ impl App {
                         slot,
                         ctx.row_menu.as_ref(),
                     );
+                    ctx.nav.push((None, store_index, response.id, slot));
                     if response.clicked() {
                         ctx.show_details = Some((None, store_index));
                     }
@@ -1378,6 +1442,18 @@ impl App {
                     },
                 });
             }
+            if arrow_nav && let Some(next) = arrow_step(ui, &ctx.nav, selected.as_ref()) {
+                let (group, index, id, slot) = ctx.nav[next].clone();
+                // Keyboard focus on a row follows the selection.
+                if ui
+                    .memory(|memory| memory.focused())
+                    .is_some_and(|focused| ctx.nav.iter().any(|row| row.2 == focused))
+                {
+                    ui.memory_mut(|memory| memory.request_focus(id));
+                }
+                ui.scroll_to_rect(slot, None);
+                ctx.show_details = Some((group, index));
+            }
             // While dragging, the selected row's fill moves with it but the outline would not.
             // The keyboard-focused row gets the same outline.
             if !egui::DragAndDrop::has_any_payload(ui.ctx()) {
@@ -1409,7 +1485,11 @@ impl App {
         let mut dropped = None;
         // Keep the list's scroll bar clear of the details panel's resize handle.
         let panel_gap = if selected.is_some() { 12.0 } else { 0.0 };
+        // The list fills the remaining space instead of shrinking to its rows. A list that
+        // empties (for example a search without matches) would otherwise collapse to zero height
+        // while its fading scroll bar can still be dragged, which egui cannot scroll.
         egui::ScrollArea::vertical()
+            .auto_shrink(false)
             .max_width(ui.available_width() - panel_gap)
             .show(ui, |ui| {
                 if let Some(profile) = profiles.get_mut(profile) {
@@ -1432,6 +1512,7 @@ impl App {
         }
 
         self.scroll_to_match = ctx.scroll_to_match;
+        details::remember_focus(ui.ctx());
 
         if ctx.needs_save {
             self.save_mod_data("Edit mod settings");
