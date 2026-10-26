@@ -4,18 +4,20 @@
 
 ## [Unreleased] - ReleaseDate
 
+## [0.6.0] - 2026-10-26
+
 - Add a Normal view for the mod list next to the existing Compact view, chosen with a switch above the list. Normal rows show the mod's thumbnail, author and summary, and Compact rows can optionally show a small thumbnail. Thumbnails are cached for offline use and can be turned off in Settings.
 - Add a details panel: click a mod's row or thumbnail to see its image, summary, author, status, version, load priority, tags, dependencies and changelogs. Rows can also be reached with Tab and opened with Enter, the Up and Down arrow keys step through the shown mods, and Escape closes the panel. The panel leaves room for the list in narrow windows. Clicking the mod name still opens its page in the browser, and right-clicking anywhere on a mod row opens its menu, which offers Hide details for the selected mod.
-- The mod menu's Move to group is now Move to shared group, with the note about shared groups in its tooltip instead of a separate line.
 - Add filter chips to show only enabled, disabled, update available, missing metadata, mod.io, web or local mods. Groups show how many members match, and dragging is paused while a filter is active.
 - Search now filters the mod list instead of only highlighting matches. It also matches mod.io tags, and groups with matching mods are shown expanded while searching.
-- mod.io tags are shown as separate labels that no longer run together, and Settings can hide them or the load priority from rows. Long mod names are shortened instead of running into the tags in narrow windows.
-- Dialogs such as Settings, Groups and Check mod files can no longer be collapsed to their title. They can be moved and resized within the main window, and scroll instead of being cut off when the window is too small.
-- The main window reopens with its previous size and position.
+- Dragging a mod or group previews the new order: the dragged row follows the pointer, and the other rows slide aside to open space where it will land.
 - Alternating mod rows have stronger contrast by default, adjustable in Settings (Off, Subtle, Medium, Strong), and the row under the pointer is highlighted. Settings can also draw lines between rows, with or without striping.
+- mod.io tags are shown as separate labels that no longer run together, and Settings can hide them or the load priority from rows. Long mod names are shortened instead of running into the tags in narrow windows.
 - Show when each mod.io mod was last updated in the Normal view and the details panel, and add Last updated sorting.
 - Install mods is highlighted in blue while the selected profile has changes that are not installed yet.
-- Dragging a mod or group previews the new order: the dragged row follows the pointer, and the other rows slide aside to open space where it will land.
+- Dialogs such as Settings, Groups and Check mod files can no longer be collapsed to their title. They can be moved and resized within the main window, and scroll instead of being cut off when the window is too small.
+- The main window reopens with its previous size and position.
+- The mod menu's Move to group is now Move to shared group, with the note about shared groups in its tooltip instead of a separate line.
 
 ## [0.5.6] - 2026-10-24
 
@@ -182,6 +184,7 @@ MINT Maintained features.
 
 <!-- next-url -->
 [Unreleased]: https://github.com/gabrielfordevelopment/mint-maintained/compare/master...develop
+[0.6.0]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.6.0
 [0.5.6]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.5.6
 [0.5.5]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.5.5
 [0.5.4]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.5.4
