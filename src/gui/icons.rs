@@ -65,6 +65,8 @@ pub enum Icon {
     Undo,
     Redo,
     Update,
+    ViewList,
+    ViewAgenda,
 }
 
 impl Icon {
@@ -93,6 +95,8 @@ impl Icon {
             Self::Undo => include_bytes!("../../assets/icons/history_undo.svg"),
             Self::Redo => include_bytes!("../../assets/icons/history_redo.svg"),
             Self::Update => include_bytes!("../../assets/icons/notification_update.svg"),
+            Self::ViewList => include_bytes!("../../assets/icons/view_list.svg"),
+            Self::ViewAgenda => include_bytes!("../../assets/icons/view_agenda.svg"),
         };
         let pixels = (size * ui.ctx().pixels_per_point()).round().max(1.0) as u32;
         let key = egui::Id::new(("material-icon", self as u8, size.to_bits()));
@@ -136,13 +140,20 @@ pub fn button(ui: &mut Ui, icon: Icon, label: &str) -> Response {
     .inner
 }
 
+/// Blue fill used by add buttons and the primary footer action: normal, hovered, pressed.
+const PRIMARY: [(u8, u8, u8); 3] = [(37, 99, 235), (29, 78, 216), (30, 64, 175)];
+
 fn style_action(ui: &mut Ui, icon: Icon) {
     let colors = match icon {
-        Icon::Add => [(37, 99, 235), (29, 78, 216), (30, 64, 175)],
+        Icon::Add => PRIMARY,
         Icon::Delete if ui.visuals().dark_mode => [(158, 36, 43), (140, 29, 36), (122, 24, 31)],
         Icon::Delete => [(190, 42, 49), (166, 30, 38), (140, 24, 31)],
         _ => return,
     };
+    style_fill(ui, colors);
+}
+
+fn style_fill(ui: &mut Ui, colors: [(u8, u8, u8); 3]) {
     let widgets = &mut ui.visuals_mut().widgets;
     for (visuals, (r, g, b)) in [
         &mut widgets.inactive,
@@ -157,6 +168,17 @@ fn style_action(ui: &mut Ui, icon: Icon) {
         visuals.fg_stroke.color = Color32::WHITE;
         visuals.bg_stroke = egui::Stroke::NONE;
     }
+}
+
+/// Text button highlighted with the add-button blue. Disabled buttons keep disabled styling.
+pub fn primary_button(ui: &mut Ui, label: &str, highlighted: bool) -> Response {
+    ui.scope(|ui| {
+        if highlighted {
+            style_fill(ui, PRIMARY);
+        }
+        ui.button(label)
+    })
+    .inner
 }
 
 pub fn delete_button(ui: &mut Ui, label: &str, size: Vec2) -> Response {
@@ -238,4 +260,121 @@ pub fn show(ui: &mut Ui, icon: Icon) -> Response {
         _ => ui.visuals().text_color(),
     };
     ui.add(icon.image(ui, color))
+}
+
+/// One option of a [`segmented`] control: value, icon, label and hover text.
+pub type Segment<'a, T> = (T, Icon, &'a str, &'a str);
+
+/// Inline select bar: joined icon-and-text segments in one border, exactly one selected.
+/// Returns true when the user picked another value.
+pub fn segmented<T: Copy + PartialEq>(
+    ui: &mut Ui,
+    id_salt: impl std::hash::Hash,
+    value: &mut T,
+    options: &[Segment<'_, T>],
+) -> bool {
+    const PADDING: f32 = 8.0;
+    const GAP: f32 = 4.0;
+    let id = ui.make_persistent_id(id_salt);
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let height = ui.spacing().interact_size.y;
+    let galleys: Vec<_> = options
+        .iter()
+        .map(|(_, _, label, _)| {
+            ui.fonts(|f| f.layout_no_wrap(label.to_string(), font.clone(), Color32::PLACEHOLDER))
+        })
+        .collect();
+    let widths: Vec<f32> = galleys
+        .iter()
+        .map(|g| PADDING * 2.0 + SIZE + GAP + g.size().x)
+        .collect();
+    let (outer, _) = ui.allocate_exact_size(
+        egui::vec2(widths.iter().sum(), height),
+        egui::Sense::hover(),
+    );
+    let visuals = ui.visuals().clone();
+    let border = visuals.widgets.noninteractive.bg_stroke.color;
+    let accent = visuals.hyperlink_color;
+    let radius = CORNER_RADIUS as f32 + 1.0;
+    let mut changed = false;
+    let mut left = outer.left();
+    for (index, ((option, icon, label, hint), galley)) in options.iter().zip(galleys).enumerate() {
+        let rect = egui::Rect::from_min_size(
+            egui::pos2(left, outer.top()),
+            egui::vec2(widths[index], height),
+        );
+        left = rect.right();
+        let response = ui
+            .interact(rect, id.with(index), egui::Sense::click())
+            .on_hover_text(*hint);
+        let selected = *value == *option;
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected, *label)
+        });
+        if response.clicked() && !selected {
+            *value = *option;
+            changed = true;
+        }
+        let corners = egui::CornerRadius {
+            nw: if index == 0 { radius as u8 } else { 0 },
+            sw: if index == 0 { radius as u8 } else { 0 },
+            ne: if index + 1 == options.len() {
+                radius as u8
+            } else {
+                0
+            },
+            se: if index + 1 == options.len() {
+                radius as u8
+            } else {
+                0
+            },
+        };
+        let fill = if selected {
+            accent.gamma_multiply(if visuals.dark_mode { 0.25 } else { 0.14 })
+        } else if response.hovered() {
+            visuals.widgets.hovered.weak_bg_fill
+        } else {
+            Color32::TRANSPARENT
+        };
+        ui.painter().rect_filled(rect, corners, fill);
+        if index > 0 {
+            ui.painter().vline(
+                rect.left(),
+                rect.y_range().shrink(1.0),
+                egui::Stroke::new(1.0_f32, border),
+            );
+        }
+        let color = if !ui.is_enabled() {
+            visuals.widgets.noninteractive.fg_stroke.color
+        } else if selected {
+            accent
+        } else {
+            visuals.text_color()
+        };
+        let icon_rect = egui::Rect::from_min_size(
+            egui::pos2(rect.left() + PADDING, rect.center().y - SIZE / 2.0),
+            Vec2::splat(SIZE),
+        );
+        icon.image(ui, color).paint_at(ui, icon_rect);
+        let text_pos = egui::pos2(
+            icon_rect.right() + GAP,
+            rect.center().y - galley.size().y / 2.0,
+        );
+        ui.painter().galley(text_pos, galley, color);
+        if response.has_focus() {
+            ui.painter().rect_stroke(
+                rect.shrink(1.0),
+                corners,
+                egui::Stroke::new(1.0_f32, visuals.selection.stroke.color),
+                egui::StrokeKind::Inside,
+            );
+        }
+    }
+    ui.painter().rect_stroke(
+        outer,
+        radius,
+        egui::Stroke::new(1.0_f32, border),
+        egui::StrokeKind::Inside,
+    );
+    changed
 }

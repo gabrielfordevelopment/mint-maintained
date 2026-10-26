@@ -20,6 +20,7 @@ async fn cancellation_keeps_completed_refreshes_and_only_resumes_remaining_mods(
             latest_modfile: Some(10),
             modfiles: vec![],
             tags: HashSet::new(),
+            details: None,
         })
     });
     mock.expect_fetch_dependencies()
@@ -67,6 +68,7 @@ async fn targeted_refresh_preserves_pins_and_offline_data_and_retries_only_failu
             changelog: None,
         }],
         tags: HashSet::new(),
+        details: None,
     };
     {
         let mut lock = store.cache.write().unwrap();
@@ -177,6 +179,7 @@ async fn targeted_refresh_does_not_commit_half_refreshed_metadata() {
         latest_modfile: Some(10),
         modfiles: vec![],
         tags: HashSet::new(),
+        details: None,
     };
     cache
         .write()
@@ -321,6 +324,7 @@ async fn cache_refresh_keeps_healthy_updates_and_retries_unavailable_entries() {
         latest_modfile: Some(id * 10),
         modfiles: vec![],
         tags: HashSet::new(),
+        details: None,
     };
     {
         let mut guard = cache.write().unwrap();
@@ -352,6 +356,7 @@ async fn cache_refresh_keeps_healthy_updates_and_retries_unavailable_entries() {
                 latest_modfile: Some(id * 10),
                 modfiles: vec![],
                 tags: HashSet::new(),
+                details: None,
             })
         }
     });

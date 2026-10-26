@@ -159,7 +159,7 @@ impl LogWindow {
                     open = false;
                 }
                 if class == egui::ViewportClass::Embedded {
-                    egui::Window::new("Live log")
+                    super::dialog("Live log", ctx, [720.0, 420.0])
                         .open(&mut open)
                         .show(ctx, |ui| self.ui(ui));
                 } else {

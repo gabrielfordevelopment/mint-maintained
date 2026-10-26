@@ -5,9 +5,8 @@ impl App {
         if let Some(_lints_toggle) = &self.lints_toggle_window {
             let mut open = true;
 
-            egui::Window::new("Check mod files")
+            dialog("Check mod files", ctx, [480.0, 460.0])
                 .open(&mut open)
-                .resizable(false)
                 .show(ctx, |ui| {
                     ui.set_max_width(460.0);
                     ui.label("Check enabled mods in this profile for conflicting files and packaging problems. Missing mod files may be downloaded. Nothing is installed into the game.");
@@ -154,9 +153,8 @@ impl App {
         if self.lint_report_window.is_some() {
             let mut open = true;
 
-            egui::Window::new("Mod file check results")
+            dialog("Mod file check results", ctx, [640.0, 440.0])
                 .open(&mut open)
-                .resizable(true)
                 .show(ctx, |ui| {
                     if let Some(report) = &self.lint_report {
                         let (checked, flagged) = report.check_counts();

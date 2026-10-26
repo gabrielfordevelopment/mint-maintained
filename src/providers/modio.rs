@@ -15,6 +15,8 @@ use tracing::*;
 
 use crate::providers::*;
 
+#[cfg(test)]
+mod details_tests;
 pub mod rate_limit;
 #[cfg(test)]
 mod reliability_tests;
@@ -130,16 +132,42 @@ pub struct ModioMod {
     latest_modfile: Option<u32>,
     modfiles: Vec<ModioFile>,
     tags: HashSet<String>,
+    /// Absent in caches written before details were stored. Filled by `backfill_details`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    details: Option<ModioDetails>,
 }
 
 impl ModioMod {
     fn new(mod_: modio::mods::Mod, files: Vec<modio::files::File>) -> Self {
+        let details = ModioDetails::new(&mod_);
         Self {
             name_id: mod_.name_id,
             name: mod_.name,
             latest_modfile: mod_.modfile.map(|f| f.id),
             modfiles: files.into_iter().map(ModioFile::new).collect(),
             tags: mod_.tags.into_iter().map(|t| t.name).collect(),
+            details: Some(details),
+        }
+    }
+}
+
+/// Presentation metadata that does not affect resolution or load order.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ModioDetails {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    logo: Option<String>,
+    #[serde(default)]
+    summary: String,
+    #[serde(default)]
+    author: String,
+}
+
+impl ModioDetails {
+    fn new(mod_: &modio::mods::Mod) -> Self {
+        Self {
+            logo: Some(mod_.logo.thumb_320x180.to_string()),
+            summary: mod_.summary.clone(),
+            author: mod_.submitted_by.username.clone(),
         }
     }
 }
@@ -302,6 +330,10 @@ pub trait DrgModio: Sync + Send {
         &self,
         filter_ids: Vec<u32>,
     ) -> Result<Vec<modio::mods::Mod>, DrgModioError>;
+    async fn fetch_details(
+        &self,
+        filter_ids: Vec<u32>,
+    ) -> Result<Vec<(u32, ModioDetails)>, DrgModioError>;
     async fn fetch_mod_updates_since(
         &self,
         mod_ids: Vec<u32>,
@@ -485,6 +517,18 @@ impl DrgModio for modio::Modio {
             .collect()
             .await
             .context(GenericModioSnafu)?)
+    }
+
+    async fn fetch_details(
+        &self,
+        filter_ids: Vec<u32>,
+    ) -> Result<Vec<(u32, ModioDetails)>, DrgModioError> {
+        Ok(self
+            .fetch_mods_by_ids(filter_ids)
+            .await?
+            .iter()
+            .map(|m| (m.id, ModioDetails::new(m)))
+            .collect())
     }
 
     async fn fetch_mod_updates_since(
@@ -1078,6 +1122,75 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
         })
     }
 
+    fn get_mod_details(&self, spec: &ModSpecification, cache: ProviderCache) -> Option<ModDetails> {
+        let cache = cache.read().unwrap();
+        let (_, mod_) = cached_mod(&cache, spec)?;
+        let details = mod_.details.clone().unwrap_or_default();
+        Some(ModDetails {
+            thumbnail_url: details.logo,
+            summary: Some(details.summary).filter(|s| !s.trim().is_empty()),
+            author: Some(details.author).filter(|s| !s.trim().is_empty()),
+            updated: mod_.modfiles.iter().map(|f| f.date_added).max(),
+        })
+    }
+
+    fn get_mod_versions(
+        &self,
+        spec: &ModSpecification,
+        cache: ProviderCache,
+    ) -> Vec<VersionDetails> {
+        let cache = cache.read().unwrap();
+        let Some((mod_id, mod_)) = cached_mod(&cache, spec) else {
+            return Vec::new();
+        };
+        let mut versions: Vec<_> = mod_
+            .modfiles
+            .iter()
+            .map(|file| VersionDetails {
+                spec: format_spec(&mod_.name_id, mod_id, Some(file.id)),
+                name: file
+                    .version
+                    .as_ref()
+                    .map_or_else(|| file.id.to_string(), |v| format!("{} - {v}", file.id)),
+                date_added: Some(file.date_added),
+                changelog: file.changelog.clone().filter(|c| !c.trim().is_empty()),
+                latest: mod_.latest_modfile == Some(file.id),
+            })
+            .collect();
+        versions.sort_by_key(|v| std::cmp::Reverse(v.date_added));
+        versions
+    }
+
+    async fn backfill_details(&self, cache: ProviderCache) -> Result<bool, ProviderError> {
+        let mut missing: Vec<u32> = cache
+            .read()
+            .unwrap()
+            .get::<ModioCache>(MODIO_PROVIDER_ID)
+            .map(|c| {
+                c.mods
+                    .iter()
+                    .filter(|(_, m)| m.details.is_none())
+                    .map(|(id, _)| *id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        missing.sort_unstable();
+        let mut changed = false;
+        for ids in missing.chunks(100) {
+            // Earlier batches stay applied when a later one fails, so they are not fetched again.
+            let fetched = self.modio.fetch_details(ids.to_vec()).await?;
+            let mut lock = cache.write().unwrap();
+            let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
+            for (id, details) in fetched {
+                if let Some(entry) = c.mods.get_mut(&id).filter(|m| m.details.is_none()) {
+                    entry.details = Some(details);
+                    changed = true;
+                }
+            }
+        }
+        Ok(changed)
+    }
+
     fn is_pinned(&self, spec: &ModSpecification, _cache: ProviderCache) -> bool {
         parse_url(&spec.url)
             .ok()
@@ -1112,6 +1225,20 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
             Some("latest".to_string())
         }
     }
+}
+
+/// The cached mod for `spec`, looked up by ID or by its name ID.
+fn cached_mod<'c>(
+    cache: &'c VersionAnnotatedCache,
+    spec: &ModSpecification,
+) -> Option<(u32, &'c ModioMod)> {
+    let parsed = parse_url(&spec.url).ok()?;
+    let prov = cache.get::<ModioCache>(MODIO_PROVIDER_ID)?;
+    let mod_id = match parsed.mod_id {
+        Some(mod_id) => mod_id,
+        None => *prov.mod_id_map.get(parsed.name_id)?,
+    };
+    Some((mod_id, prov.mods.get(&mod_id)?))
 }
 
 fn process_modio_tags(set: &HashSet<String>) -> ModioTags {
@@ -1254,6 +1381,7 @@ mod test {
                             changelog: None,
                         }],
                         tags: HashSet::new(),
+                        details: None,
                     },
                     dependencies: vec![],
                 },

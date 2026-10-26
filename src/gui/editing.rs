@@ -413,8 +413,7 @@ fn edit_message(action: &Edit, item: &str, data: &crate::state::ModData_v0_1_0) 
 
 pub(super) fn mod_context_menu(ui: &mut Ui, groups: &[String], target: ListTarget) -> Option<Edit> {
     let mut edit = None;
-    ui.label("Groups are shared across profiles.");
-    ui.menu_button("Move to group…", |ui| {
+    ui.menu_button("Move to shared group…", |ui| {
         for name in groups {
             if target.group.as_ref() != Some(name) && ui.button(name).clicked() {
                 edit = Some(Edit::MoveMod {
@@ -427,7 +426,11 @@ pub(super) fn mod_context_menu(ui: &mut Ui, groups: &[String], target: ListTarge
         if groups.is_empty() {
             ui.label("Create a group with the Groups button first.");
         }
-    });
+    })
+    .response
+    .on_hover_text(
+        "Groups are shared by all profiles, so every profile using the group gets the mod.",
+    );
     if target.group.is_some() && ui.button("Move out of group").clicked() {
         edit = Some(Edit::MoveMod {
             source: target,

@@ -46,6 +46,25 @@ impl FetchProgress {
     }
 }
 
+/// Optional presentation metadata for the details panel and thumbnails.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModDetails {
+    pub thumbnail_url: Option<String>,
+    pub summary: Option<String>,
+    pub author: Option<String>,
+    /// Upload time of the newest cached file, in Unix seconds.
+    pub updated: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VersionDetails {
+    pub spec: ModSpecification,
+    pub name: String,
+    pub date_added: Option<u64>,
+    pub changelog: Option<String>,
+    pub latest: bool,
+}
+
 #[async_trait::async_trait]
 pub trait ModProvider: Send + Sync {
     async fn resolve_mod(
@@ -76,6 +95,26 @@ pub trait ModProvider: Send + Sync {
     /// Check if provider is configured correctly
     async fn check(&self) -> Result<(), ProviderError>;
     fn get_mod_info(&self, spec: &ModSpecification, cache: ProviderCache) -> Option<ModInfo>;
+    /// Cached presentation metadata. Never performs network requests.
+    fn get_mod_details(
+        &self,
+        _spec: &ModSpecification,
+        _cache: ProviderCache,
+    ) -> Option<ModDetails> {
+        None
+    }
+    /// Cached versions with their changelogs, newest first.
+    fn get_mod_versions(
+        &self,
+        _spec: &ModSpecification,
+        _cache: ProviderCache,
+    ) -> Vec<VersionDetails> {
+        Vec::new()
+    }
+    /// Fetches presentation metadata missing from older caches. Returns whether the cache changed.
+    async fn backfill_details(&self, _cache: ProviderCache) -> Result<bool, ProviderError> {
+        Ok(false)
+    }
     fn is_pinned(&self, spec: &ModSpecification, cache: ProviderCache) -> bool;
     fn get_version_name(&self, spec: &ModSpecification, cache: ProviderCache) -> Option<String>;
 }
