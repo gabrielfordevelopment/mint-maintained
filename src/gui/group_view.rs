@@ -7,6 +7,9 @@ pub(super) struct GroupViews(HashMap<(String, String), GroupView>);
 pub(super) struct GroupView {
     pub open: bool,
     pub rect: Option<egui::Rect>,
+    /// Collapsed while searching. Searching shows groups expanded, and clicking a header then
+    /// collapses it only until the search is cleared, never changing `open`.
+    pub search_closed: bool,
     hover_since: Option<f64>,
     temporary: bool,
 }

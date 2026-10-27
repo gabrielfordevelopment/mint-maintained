@@ -273,3 +273,117 @@ fn malformed_legacy_profiles_are_not_removed_or_replaced() {
     assert_eq!(fs::read_to_string(legacy).unwrap(), "{broken");
     assert!(!current.exists());
 }
+
+#[test]
+fn mod_list_settings_default_for_old_configs_and_survive_reload() {
+    let defaults = ModListSettings::default();
+    assert_eq!(defaults.view, ModListView::Compact);
+    assert_eq!(defaults.priority, PriorityDisplay::Always);
+    assert!(!defaults.compact_thumbnails && defaults.normal_thumbnails);
+    assert!(defaults.download_thumbnails && defaults.show_tags);
+    assert_eq!(defaults.striping, RowStriping::Medium);
+    for versioned in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let dirs = Dirs::from_path(directory.path()).unwrap();
+        let path = dirs.config_dir.join("config.json");
+        let mut value = serde_json::json!({
+            "provider_parameters": {}, "drg_pak_path": null,
+            "gui_theme": null, "sorting_config": null
+        });
+        if versioned {
+            value["version"] = "0.0.0".into();
+        }
+        fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+        {
+            let mut state = State::init(dirs.clone()).unwrap();
+            assert_eq!(state.config.mod_list, defaults);
+            state.config.mod_list = ModListSettings {
+                view: ModListView::Normal,
+                compact_thumbnails: true,
+                normal_thumbnails: false,
+                download_thumbnails: false,
+                priority: PriorityDisplay::Hidden,
+                show_tags: false,
+                striping: RowStriping::Strong,
+                row_lines: true,
+                details_width: Some(320.0),
+            };
+            state.config.save().unwrap();
+        }
+        let state = State::init(dirs).unwrap();
+        assert_eq!(state.config.mod_list.view, ModListView::Normal);
+        assert_eq!(state.config.mod_list.priority, PriorityDisplay::Hidden);
+        assert!(state.config.mod_list.compact_thumbnails);
+        assert!(!state.config.mod_list.normal_thumbnails);
+        assert!(!state.config.mod_list.download_thumbnails);
+        assert!(!state.config.mod_list.show_tags);
+        assert_eq!(state.config.mod_list.striping, RowStriping::Strong);
+        assert!(state.config.mod_list.row_lines);
+        assert_eq!(state.config.mod_list.details_width, Some(320.0));
+    }
+}
+
+#[test]
+fn development_priority_value_reads_as_always() {
+    let settings: ModListSettings = serde_json::from_str(r#"{"priority":"non_zero"}"#).unwrap();
+    assert_eq!(settings.priority, PriorityDisplay::Always);
+    assert_eq!(
+        serde_json::to_value(&settings).unwrap()["priority"],
+        "always"
+    );
+}
+
+#[test]
+fn partial_mod_list_settings_keep_remaining_defaults() {
+    let settings: ModListSettings = serde_json::from_str(r#"{"view":"normal"}"#).unwrap();
+    assert_eq!(
+        settings,
+        ModListSettings {
+            view: ModListView::Normal,
+            ..Default::default()
+        }
+    );
+}
+
+#[test]
+fn invalid_mod_list_settings_preserve_config_bytes() {
+    for setting in [
+        serde_json::json!({"view": "grid"}),
+        serde_json::json!({"priority": "sometimes"}),
+        serde_json::json!({"show_tags": "yes"}),
+        serde_json::json!({"striping": "loud"}),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let dirs = Dirs::from_path(directory.path()).unwrap();
+        let path = dirs.config_dir.join("config.json");
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "version": "0.0.0", "provider_parameters": {}, "drg_pak_path": null,
+            "gui_theme": null, "sorting_config": null, "mod_list": setting
+        }))
+        .unwrap();
+        fs::write(&path, &bytes).unwrap();
+        assert!(State::init(dirs).is_err());
+        assert_eq!(fs::read(path).unwrap(), bytes);
+    }
+}
+
+#[test]
+fn last_updated_sorting_survives_reload_with_a_stable_wire_name() {
+    let directory = tempfile::tempdir().unwrap();
+    let dirs = Dirs::from_path(directory.path()).unwrap();
+    {
+        let mut state = State::init(dirs.clone()).unwrap();
+        state.config.sorting_config = Some(SortingConfig {
+            sort_category: SortBy::LastUpdated,
+            is_ascending: true,
+        });
+        state.config.save().unwrap();
+    }
+    let saved: serde_json::Value =
+        serde_json::from_slice(&fs::read(dirs.config_dir.join("config.json")).unwrap()).unwrap();
+    assert_eq!(saved["sorting_config"]["sort_category"], "LastUpdated");
+    let state = State::init(dirs).unwrap();
+    let sorting = state.config.sorting_config.as_ref().unwrap();
+    assert_eq!(sorting.sort_category, SortBy::LastUpdated);
+    assert!(sorting.is_ascending);
+}

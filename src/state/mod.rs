@@ -1,7 +1,7 @@
 pub mod config;
 pub mod edits;
 mod settings;
-pub use settings::{GuiTheme, SortBy};
+pub use settings::{GuiTheme, ModListSettings, ModListView, PriorityDisplay, RowStriping, SortBy};
 
 #[cfg(test)]
 mod persistence_tests;
@@ -444,6 +444,8 @@ pub struct Config {
     #[serde(default = "default_true")]
     pub show_notifications: bool,
     pub sorting_config: Option<SortingConfig>,
+    #[serde(default)]
+    pub mod_list: ModListSettings,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -519,6 +521,7 @@ impl Default for Config!["0.0.0"] {
             gui_theme: None,
             show_notifications: default_true(),
             sorting_config: None,
+            mod_list: Default::default(),
         }
     }
 }

@@ -13,13 +13,21 @@ impl App {
             .get(profile)
             .map(|p| p.mods.as_slice())
             .unwrap_or_default();
-        let profile = sorted_mod_indices(
+        let get_info = |spec: &ModSpecification| self.state.store.get_mod_info(spec);
+        let get_updated = |spec: &ModSpecification| {
+            self.state
+                .store
+                .get_mod_details(spec)
+                .and_then(|details| details.updated)
+        };
+        let profile = sorted_mod_indices_with_dates(
             entries.iter().map(|entry| match entry {
                 ModOrGroup::Individual(config) => Some(config),
                 ModOrGroup::Group { .. } => None,
             }),
             config,
-            |spec| self.state.store.get_mod_info(spec),
+            get_info,
+            get_updated,
         );
         let groups = entries
             .iter()
@@ -28,9 +36,12 @@ impl App {
                     self.state.mod_data.groups.get(group_name).map(|group| {
                         (
                             group_name.clone(),
-                            sorted_mod_indices(group.mods.iter().map(Some), config, |spec| {
-                                self.state.store.get_mod_info(spec)
-                            }),
+                            sorted_mod_indices_with_dates(
+                                group.mods.iter().map(Some),
+                                config,
+                                get_info,
+                                get_updated,
+                            ),
                         )
                     })
                 }
@@ -106,34 +117,50 @@ impl App {
     }
 }
 
+/// Sorts without update dates. Last updated then falls back to name order.
+#[cfg(test)]
 pub(super) fn sorted_mod_indices<'a>(
     mods: impl IntoIterator<Item = Option<&'a ModConfig>>,
     config: Option<&SortingConfig>,
     get_info: impl Fn(&ModSpecification) -> Option<ModInfo>,
 ) -> Vec<usize> {
+    sorted_mod_indices_with_dates(mods, config, get_info, |_| None)
+}
+
+pub(super) fn sorted_mod_indices_with_dates<'a>(
+    mods: impl IntoIterator<Item = Option<&'a ModConfig>>,
+    config: Option<&SortingConfig>,
+    get_info: impl Fn(&ModSpecification) -> Option<ModInfo>,
+    get_updated: impl Fn(&ModSpecification) -> Option<u64>,
+) -> Vec<usize> {
+    let by_date = config.is_some_and(|c| c.sort_category == SortBy::LastUpdated);
     let mut entries: Vec<_> = mods
         .into_iter()
         .enumerate()
         .map(|(index, mc)| {
             let info = config.and_then(|_| mc.and_then(|mc| get_info(&mc.spec)));
-            (index, mc, info)
+            let updated = mc.filter(|_| by_date).and_then(|mc| get_updated(&mc.spec));
+            (index, mc, info, updated)
         })
         .collect();
     if let Some(config) = config {
         let compare = sort_mods(config);
         // Group entries separate independently sorted runs and retain their positions.
-        for run in entries.split_mut(|(_, mc, _)| mc.is_none()) {
-            run.sort_by(|(_, a, info_a), (_, b, info_b)| {
-                compare((a.unwrap(), info_a.as_ref()), (b.unwrap(), info_b.as_ref()))
+        for run in entries.split_mut(|(_, mc, _, _)| mc.is_none()) {
+            run.sort_by(|(_, a, info_a, date_a), (_, b, info_b, date_b)| {
+                compare(
+                    (a.unwrap(), info_a.as_ref(), *date_a),
+                    (b.unwrap(), info_b.as_ref(), *date_b),
+                )
             });
         }
     }
-    entries.into_iter().map(|(index, _, _)| index).collect()
+    entries.into_iter().map(|(index, ..)| index).collect()
 }
 
-type ModListEntry<'a> = (&'a ModConfig, Option<&'a ModInfo>);
+type ModListEntry<'a> = (&'a ModConfig, Option<&'a ModInfo>, Option<u64>);
 fn sort_mods(config: &SortingConfig) -> impl Fn(ModListEntry, ModListEntry) -> Ordering {
-    move |(mc_a, info_a), (mc_b, info_b)| {
+    move |(mc_a, info_a, updated_a), (mc_b, info_b, updated_b)| {
         fn map_cmp<V, M, F>(a: &V, b: &V, map: F) -> Ordering
         where
             M: Ord,
@@ -161,6 +188,7 @@ fn sort_mods(config: &SortingConfig) -> impl Fn(ModListEntry, ModListEntry) -> O
             SortBy::Provider => provider_order,
             SortBy::RequiredStatus => required_order,
             SortBy::ApprovalCategory => approval_order,
+            SortBy::LastUpdated => updated_a.cmp(&updated_b),
         };
 
         if config.is_ascending {

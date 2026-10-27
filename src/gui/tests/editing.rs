@@ -253,7 +253,7 @@ fn group_creation_and_context_menu_move_are_wired_to_saved_profile_data() {
             },
         ]);
     }
-    test.full_button("Move to group…", false);
+    test.full_button("Move to shared group…", false);
     let frame = test.full_frame(vec![]);
     let destination = button_rects(&frame, "Shared edits")
         .into_iter()

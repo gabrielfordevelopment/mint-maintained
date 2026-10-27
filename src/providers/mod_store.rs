@@ -259,6 +259,43 @@ impl ModStore {
             .get_mod_info(spec, self.cache.clone())
     }
 
+    pub fn get_mod_details(&self, spec: &ModSpecification) -> Option<ModDetails> {
+        self.get_provider(&spec.url)
+            .ok()?
+            .get_mod_details(spec, self.cache.clone())
+    }
+
+    pub fn get_mod_versions(&self, spec: &ModSpecification) -> Vec<VersionDetails> {
+        self.get_provider(&spec.url)
+            .map(|provider| provider.get_mod_versions(spec, self.cache.clone()))
+            .unwrap_or_default()
+    }
+
+    /// Provider that handles `url`, available even without metadata or configuration.
+    pub fn provider_id(url: &str) -> Option<&'static str> {
+        Self::get_provider_factories()
+            .find(|f| (f.can_provide)(url))
+            .map(|f| f.id)
+    }
+
+    /// Fills presentation metadata missing from older caches and saves any successes.
+    pub async fn backfill_details(&self) -> Result<bool, ProviderError> {
+        let providers = self.providers.read().unwrap().clone();
+        let mut changed = false;
+        let mut failure = None;
+        for provider in providers.values() {
+            match provider.backfill_details(self.cache.clone()).await {
+                Ok(provider_changed) => changed |= provider_changed,
+                Err(error) => failure = Some(error),
+            }
+        }
+        if changed || failure.is_some() {
+            // A failed batch can follow applied ones. Keep those partial successes.
+            self.save_cache()?;
+        }
+        failure.map_or(Ok(changed), Err)
+    }
+
     pub fn is_pinned(&self, spec: &ModSpecification) -> bool {
         self.get_provider(&spec.url)
             .unwrap()

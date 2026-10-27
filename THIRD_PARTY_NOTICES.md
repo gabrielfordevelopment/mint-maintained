@@ -40,6 +40,27 @@ Sources: https://github.com/chronotope/chrono and
 https://github.com/rust-windowing/raw-window-handle.
 Their MIT license texts are included in `assets/icons/DEPENDENCY_LICENSES.txt`.
 
+## Mod thumbnails
+
+mod.io thumbnails are decoded with the image crate's JPEG support, which adds
+zune-jpeg 0.4.21 and zune-core 0.4.12 (MIT OR Apache-2.0 OR Zlib), used under
+the MIT license option. Both are pure Rust and have no further dependencies.
+Source: https://github.com/etemesi254/zune-image.
+Their MIT license text is included in `assets/icons/DEPENDENCY_LICENSES.txt`.
+
+Thumbnails are downloaded from the image URLs mod.io reports for each mod,
+without provider credentials, and cached in the cache directory. Settings can
+turn downloading off.
+
+## Window state
+
+The main window's size and position are saved with eframe's persistence
+feature, which adds RON 0.8.1 (MIT OR Apache-2.0, used under the MIT option)
+for the small state file. Source: https://github.com/ron-rs/ron.
+Its MIT license text is included in `assets/icons/DEPENDENCY_LICENSES.txt`.
+The feature also builds enumn 0.1.14 (MIT OR Apache-2.0), a build-time macro
+that is not part of the application at runtime: https://github.com/dtolnay/enumn.
+
 ## Material Symbols
 
 The icons in `assets/icons/*.svg`, except `notification_*.svg` and
@@ -57,7 +78,7 @@ Upstream path: `symbols/web/<name>/materialsymbolsrounded/<name>_20px.svg`
 
 Included symbols: add, content_copy, dark_mode, delete, desktop_windows,
 drag_handle, error, file_copy, folder, keyboard_arrow_right, language, light_mode,
-settings, warning.
+settings, view_agenda, view_list, warning.
 
 Modification: an explicit white fill was added for runtime theme tinting.
 The original vector geometry is unchanged. Each file identifies the change.

@@ -12,11 +12,17 @@ Thank you to both developers and everyone who contributed along the way.
 
 MINT Maintained is my continuation of their Deep Rock Galactic mod manager, focused on a refreshed interface, everyday quality of life improvements, and resolving bugs and crashes.
 
-![MINT Maintained overview](docs/images/mint-0.5.0-overview-light.png)
+![MINT Maintained compact mod list with groups and row lines](docs/images/mint-0.6.0-compact-light.png)
 
 Organize profiles and shared groups, manage mod versions and load order, check updates, and install mods through one desktop application.
 
-![MINT Maintained settings](docs/images/mint-0.5.0-settings-light.png)
+![MINT Maintained details panel for a selected mod](docs/images/mint-0.6.0-details-light.png)
+
+Select a mod to see its thumbnail, summary, author, status, version, tags and changelogs, and narrow long lists with search and filters.
+
+![MINT Maintained normal view with thumbnails and summaries](docs/images/mint-0.6.0-normal-light.png)
+
+Switch to the Normal view for larger rows with thumbnails, authors, update dates and summaries.
 
 ## Getting started
 

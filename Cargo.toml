@@ -9,7 +9,7 @@ members = [
 repository = "https://github.com/gabrielfordevelopment/mint-maintained"
 authors = ["trumank", "jieyouxu"]
 license = "MIT OR Apache-2.0"
-version = "0.5.6"
+version = "0.6.0"
 edition = "2024"
 
 [workspace.dependencies]
@@ -28,7 +28,7 @@ tokio = "1.47.1"
 reqwest = { version = "0.11.27", default-features = false, features = ["blocking", "rustls", "json"] }
 snafu = "0.8.7"
 resvg = { version = "0.48.1", default-features = false }
-image = { version = "0.25.6", default-features = false, features = ["png"] }
+image = { version = "0.25.6", default-features = false, features = ["png", "jpeg"] }
 
 [package]
 name = "mint"
@@ -51,7 +51,7 @@ clap = { version = "4.5.46", features = ["derive"] }
 chrono = { version = "0.4.31", default-features = false, features = ["std"] }
 dialoguer = "0.11.0"
 directories = "6.0.0"
-eframe = "0.31.1"
+eframe = { version = "0.31.1", features = ["persistence"] }
 egui = "0.31.1"
 resvg.workspace = true
 egui_commonmark = "0.20.0"

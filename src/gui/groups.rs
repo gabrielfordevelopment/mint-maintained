@@ -29,7 +29,7 @@ impl App {
         let busy = self.editing_busy() || self.delete_confirmation.is_some();
         let mut open = true;
         let mut action = None;
-        egui::Window::new("Groups").open(&mut open).default_width(400.0).show(ctx, |ui| {
+        dialog("Groups", ctx, [420.0, 360.0]).open(&mut open).show(ctx, |ui| {
             ui.add_enabled_ui(!busy, |ui| {
                 ui.horizontal(|ui| {
                     let input = ui.add(inputs::bordered(egui::TextEdit::singleline(&mut window.new_name).hint_text("New group name").desired_width(220.0)));
