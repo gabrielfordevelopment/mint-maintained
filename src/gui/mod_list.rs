@@ -587,6 +587,9 @@ impl App {
                     }
                 })
                 .collect::<Vec<_>>();
+            // Rows ask about duplicates and missing dependencies, so index once instead of
+            // comparing every pair of mods on every frame.
+            let enabled_specs = mint_lib::mod_info::DependencyIndex::new(enabled_specs);
 
             // Shows the most important tags that fit in `budget`. The rest stay in the details panel.
             let ui_mod_tags = |ctx: &mut Ctx, ui: &mut Ui, info: &ModInfo, budget: f32| {
@@ -814,10 +817,10 @@ impl App {
                     }
 
                     if mc.enabled {
-                        let is_duplicate = enabled_specs.iter().any(|((name, index), spec)| {
-                            (group, row_index) != (name.as_deref(), *index)
-                                && info.spec.satisfies_dependency(spec)
-                        });
+                        let is_duplicate = enabled_specs
+                            .satisfies_other(&info.spec, |(name, index)| {
+                                (group, row_index) == (name.as_deref(), *index)
+                            });
                         if is_duplicate
                             && icons::button(ui, Icon::Warning, "Remove duplicate").clicked()
                         {
@@ -827,9 +830,7 @@ impl App {
                         let missing_deps = info
                             .suggested_dependencies
                             .iter()
-                            .filter(|d| {
-                                !enabled_specs.iter().any(|(_, s)| s.satisfies_dependency(d))
-                            })
+                            .filter(|d| !enabled_specs.provides(d))
                             .collect::<Vec<_>>();
 
                         if !missing_deps.is_empty() {

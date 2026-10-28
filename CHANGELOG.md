@@ -4,6 +4,8 @@
 
 ## [Unreleased] - ReleaseDate
 
+- Large profiles with hundreds of mods no longer make the window lag while it is moved, scrolled or resized.
+
 ## [0.6.0] - 2026-10-26
 
 - Add a Normal view for the mod list next to the existing Compact view, chosen with a switch above the list. Normal rows show the mod's thumbnail, author and summary, and Compact rows can optionally show a small thumbnail. Thumbnails are cached for offline use and can be turned off in Settings.

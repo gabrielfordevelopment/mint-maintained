@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use serde::{Deserialize, Serialize};
 
@@ -72,24 +72,10 @@ impl ModSpecification {
         if self.url == other.url {
             return true;
         }
-        fn identity(value: &str) -> Option<(String, Option<u64>, Option<u64>)> {
-            let url = reqwest::Url::parse(value).ok()?;
-            if url.scheme() != "https" || url.host_str()? != "mod.io" || url.query().is_some() {
-                return None;
-            }
-            let slug = url.path().strip_prefix("/g/drg/m/")?.trim_end_matches('/');
-            if slug.is_empty() || slug.contains('/') {
-                return None;
-            }
-            let mut ids = url.fragment().unwrap_or_default().split('/');
-            let id = ids.next().and_then(|id| id.parse().ok());
-            let file = ids.next().and_then(|id| id.parse().ok());
-            if ids.next().is_some() {
-                return None;
-            }
-            Some((slug.to_owned(), id, file))
-        }
-        match (identity(&self.url), identity(&other.url)) {
+        match (
+            dependency_identity(&self.url),
+            dependency_identity(&other.url),
+        ) {
             (Some((slug, id, file)), Some((other_slug, other_id, other_file))) => {
                 let same_mod = match (id, other_id) {
                     (Some(id), Some(other_id)) => id == other_id,
@@ -99,6 +85,84 @@ impl ModSpecification {
             }
             _ => false,
         }
+    }
+}
+
+/// mod.io slug, mod ID and file ID that dependency matching compares.
+fn dependency_identity(value: &str) -> Option<(String, Option<u64>, Option<u64>)> {
+    let url = reqwest::Url::parse(value).ok()?;
+    if url.scheme() != "https" || url.host_str()? != "mod.io" || url.query().is_some() {
+        return None;
+    }
+    let slug = url.path().strip_prefix("/g/drg/m/")?.trim_end_matches('/');
+    if slug.is_empty() || slug.contains('/') {
+        return None;
+    }
+    let mut ids = url.fragment().unwrap_or_default().split('/');
+    let id = ids.next().and_then(|id| id.parse().ok());
+    let file = ids.next().and_then(|id| id.parse().ok());
+    if ids.next().is_some() {
+        return None;
+    }
+    Some((slug.to_owned(), id, file))
+}
+
+/// Answers dependency questions about a list of specs without comparing every pair.
+///
+/// Two specs can only match when they share a URL, a mod.io mod ID or a slug, so lookups check
+/// [`ModSpecification::satisfies_dependency`] against those candidates alone.
+pub struct DependencyIndex<K> {
+    entries: Vec<(K, ModSpecification)>,
+    by_url: HashMap<String, Vec<usize>>,
+    by_id: HashMap<u64, Vec<usize>>,
+    by_slug: HashMap<String, Vec<usize>>,
+}
+
+impl<K> DependencyIndex<K> {
+    pub fn new(entries: impl IntoIterator<Item = (K, ModSpecification)>) -> Self {
+        let mut index = Self {
+            entries: entries.into_iter().collect(),
+            by_url: HashMap::new(),
+            by_id: HashMap::new(),
+            by_slug: HashMap::new(),
+        };
+        for (i, (_, spec)) in index.entries.iter().enumerate() {
+            index.by_url.entry(spec.url.clone()).or_default().push(i);
+            if let Some((slug, id, _)) = dependency_identity(&spec.url) {
+                if let Some(id) = id {
+                    index.by_id.entry(id).or_default().push(i);
+                }
+                index.by_slug.entry(slug).or_default().push(i);
+            }
+        }
+        index
+    }
+
+    fn candidates(&self, spec: &ModSpecification) -> impl Iterator<Item = &(K, ModSpecification)> {
+        let mut found: Vec<usize> = self.by_url.get(&spec.url).cloned().unwrap_or_default();
+        if let Some((slug, id, _)) = dependency_identity(&spec.url) {
+            if let Some(id) = id {
+                found.extend(self.by_id.get(&id).into_iter().flatten());
+            }
+            found.extend(self.by_slug.get(&slug).into_iter().flatten());
+        }
+        found.sort_unstable();
+        found.dedup();
+        found.into_iter().map(|i| &self.entries[i])
+    }
+
+    /// Whether `spec` satisfies an entry that `skip` does not exclude, that is
+    /// `spec.satisfies_dependency(entry)`.
+    pub fn satisfies_other(&self, spec: &ModSpecification, skip: impl Fn(&K) -> bool) -> bool {
+        self.candidates(spec)
+            .any(|(key, other)| !skip(key) && spec.satisfies_dependency(other))
+    }
+
+    /// Whether an entry satisfies the dependency `dependency`, that is
+    /// `entry.satisfies_dependency(dependency)`.
+    pub fn provides(&self, dependency: &ModSpecification) -> bool {
+        self.candidates(dependency)
+            .any(|(_, spec)| spec.satisfies_dependency(dependency))
     }
 }
 
@@ -123,6 +187,61 @@ mod identity_tests {
             let left = ModSpecification::new(left.into());
             assert!(left.satisfies_dependency(&left));
             assert!(!left.satisfies_dependency(&ModSpecification::new(right.into())));
+        }
+    }
+
+    #[test]
+    fn dependency_index_matches_comparing_every_pair() {
+        let specs: Vec<_> = [
+            "https://mod.io/g/drg/m/tool",
+            "https://mod.io/g/drg/m/tool/",
+            "https://mod.io/g/drg/m/tool#1",
+            "https://mod.io/g/drg/m/tool#1/10",
+            "https://mod.io/g/drg/m/tool#1/11",
+            "https://mod.io/g/drg/m/renamed#1/10",
+            "https://mod.io/g/drg/m/tool#12",
+            "https://mod.io/g/drg/m/tool-extra",
+            "https://mod.io/g/drg/m/tool/#description",
+            "https://mod.io/g/drg/m/tool#1/10/2",
+            "https://mod.io/g/drg/m/tool?x=1",
+            "HTTPS://MOD.IO/g/drg/m/tool#1",
+            "http://mod.io/g/drg/m/tool#1",
+            "https://example.org/a",
+            "https://example.org/ab",
+            r"C:\mods\local.pak",
+            "local.pak",
+            "local.pak",
+            "",
+        ]
+        .into_iter()
+        .map(|url| ModSpecification::new(url.into()))
+        .collect();
+        let index = DependencyIndex::new(specs.iter().cloned().enumerate());
+        for (key, spec) in specs.iter().enumerate() {
+            let pairs = specs
+                .iter()
+                .enumerate()
+                .any(|(other, s)| other != key && spec.satisfies_dependency(s));
+            assert_eq!(
+                index.satisfies_other(spec, |k| *k == key),
+                pairs,
+                "{}",
+                spec.url
+            );
+            let provided = specs.iter().any(|s| s.satisfies_dependency(spec));
+            assert_eq!(index.provides(spec), provided, "{}", spec.url);
+        }
+        for missing in [
+            "https://mod.io/g/drg/m/other#99",
+            "https://mod.io/g/drg/m/tool#1/12",
+        ] {
+            let missing = ModSpecification::new(missing.into());
+            let provided = specs.iter().any(|s| s.satisfies_dependency(&missing));
+            assert_eq!(index.provides(&missing), provided, "{}", missing.url);
+            assert_eq!(
+                index.satisfies_other(&missing, |_| false),
+                specs.iter().any(|s| missing.satisfies_dependency(s))
+            );
         }
     }
 }
