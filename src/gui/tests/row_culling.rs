@@ -525,11 +525,24 @@ fn a_large_group_dragged_far_by_auto_scroll_matches_a_fully_drawn_list() {
     }
     let before = serde_json::to_value(&*a.app.state.mod_data).unwrap();
     for frame in 0..300 {
-        same(&mut a, &mut b, vec![], &format!("auto scroll frame {frame}"));
+        same(
+            &mut a,
+            &mut b,
+            vec![],
+            &format!("auto scroll frame {frame}"),
+        );
     }
     // Cancel the drag outside the list, leaving the saved order unchanged.
     let outside = egui::pos2(handle.x, SIZE.y - 5.0);
-    same(&mut a, &mut b, vec![egui::Event::PointerMoved(outside)], "leave");
+    same(
+        &mut a,
+        &mut b,
+        vec![egui::Event::PointerMoved(outside)],
+        "leave",
+    );
     same(&mut a, &mut b, vec![button(outside, false)], "release");
-    assert_eq!(serde_json::to_value(&*a.app.state.mod_data).unwrap(), before);
+    assert_eq!(
+        serde_json::to_value(&*a.app.state.mod_data).unwrap(),
+        before
+    );
 }
