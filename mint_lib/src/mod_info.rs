@@ -151,6 +151,14 @@ impl<K> DependencyIndex<K> {
         found.into_iter().map(|i| &self.entries[i])
     }
 
+    /// Whether the index was built from exactly these entries, so it can be reused.
+    pub fn is_for(&self, entries: &[(K, ModSpecification)]) -> bool
+    where
+        K: PartialEq,
+    {
+        self.entries == entries
+    }
+
     /// Whether `spec` satisfies an entry that `skip` does not exclude, that is
     /// `spec.satisfies_dependency(entry)`.
     pub fn satisfies_other(&self, spec: &ModSpecification, skip: impl Fn(&K) -> bool) -> bool {
@@ -231,6 +239,12 @@ mod identity_tests {
             let provided = specs.iter().any(|s| s.satisfies_dependency(spec));
             assert_eq!(index.provides(spec), provided, "{}", spec.url);
         }
+        let entries: Vec<_> = specs.iter().cloned().enumerate().collect();
+        assert!(index.is_for(&entries));
+        assert!(!index.is_for(&entries[1..]));
+        let mut changed = entries.clone();
+        changed[0].1 = ModSpecification::new("https://mod.io/g/drg/m/other".into());
+        assert!(!index.is_for(&changed));
         for missing in [
             "https://mod.io/g/drg/m/other#99",
             "https://mod.io/g/drg/m/tool#1/12",

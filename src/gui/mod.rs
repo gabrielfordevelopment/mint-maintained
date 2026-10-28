@@ -218,6 +218,8 @@ pub struct App {
     group_views: group_view::GroupViews,
     /// Heights of mod rows, for skipping rows outside the visible part of the list.
     row_heights: mod_list::RowHeights,
+    /// Duplicate and dependency index of the shown profile's enabled mods.
+    dependency_index: Option<mod_list::DependencyIndex>,
     /// Whether rows outside the visible part of the list are skipped. Tests turn it off to
     /// compare with a fully drawn list.
     cull_rows: bool,
@@ -376,6 +378,7 @@ impl App {
             log_window: None,
             group_views: Default::default(),
             row_heights: Default::default(),
+            dependency_index: None,
             cull_rows: true,
             details: None,
             priority_edit: None,

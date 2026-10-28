@@ -407,6 +407,9 @@ fn selection_tint(visuals: &egui::Visuals, amount: f32) -> Color32 {
     )
 }
 
+/// Enabled mods of the shown profile by group and index, for duplicate and dependency checks.
+pub(super) type DependencyIndex = mint_lib::mod_info::DependencyIndex<(Option<String>, usize)>;
+
 /// Heights of mod rows when they were last drawn, keyed by their paint key, and the layout they
 /// were measured with.
 #[derive(Default)]
@@ -464,12 +467,14 @@ impl RowCulling {
         };
         let dragged = drag_drop::dragged_source(ui.ctx());
         let clip = ui.clip_rect();
-        // Rows a little outside the view are drawn as well. While dragging, rows slide by up to
-        // the dragged row's height, so a tall group must not uncover rows that were skipped.
-        let mut margin = (clip.height() / 2.0).max(64.0);
-        if dragged.is_some() {
-            margin += previous.values().copied().fold(0.0, f32::max);
-        }
+        // Rows are laid out where they are shown, so a few rows of margin are enough. While
+        // dragging, rows slide by up to the dragged row's height, so a tall group must not
+        // uncover rows that were skipped.
+        let margin = if dragged.is_some() {
+            clip.height() / 2.0 + previous.values().copied().fold(0.0, f32::max)
+        } else {
+            64.0
+        };
         Self {
             previous,
             next: RowHeights {
@@ -704,6 +709,7 @@ impl App {
             priority_edit: Option<(egui::Id, bool)>,
             row_heights: RowHeights,
             culling: Option<RowCulling>,
+            dependencies: Option<DependencyIndex>,
             /// The current row's name has its context menu open.
             name_menu_open: bool,
         }
@@ -730,6 +736,7 @@ impl App {
             priority_edit: None,
             row_heights: std::mem::take(&mut self.row_heights),
             culling: None,
+            dependencies: self.dependency_index.take(),
             name_menu_open: false,
         };
         // Row heights depend on the view and text size, not on the window width: rows truncate
@@ -783,8 +790,12 @@ impl App {
                 })
                 .collect::<Vec<_>>();
             // Rows ask about duplicates and missing dependencies, so index once instead of
-            // comparing every pair of mods on every frame.
-            let enabled_specs = mint_lib::mod_info::DependencyIndex::new(enabled_specs);
+            // comparing every pair of mods on every frame. The index is kept while the enabled
+            // mods stay the same.
+            let enabled_specs = match ctx.dependencies.take() {
+                Some(index) if index.is_for(&enabled_specs) => index,
+                _ => DependencyIndex::new(enabled_specs),
+            };
 
             // Shows the most important tags that fit in `budget`. The rest stay in the details panel.
             let ui_mod_tags = |ctx: &mut Ctx, ui: &mut Ui, info: &ModInfo, budget: f32| {
@@ -1766,6 +1777,7 @@ impl App {
             if let Some(culling) = ctx.culling.take() {
                 ctx.row_heights = culling.next;
             }
+            ctx.dependencies = Some(enabled_specs);
             drag_drop::finish(
                 ui,
                 &ctx.rows,
@@ -1808,6 +1820,7 @@ impl App {
 
         self.scroll_to_match = ctx.scroll_to_match;
         self.row_heights = std::mem::take(&mut ctx.row_heights);
+        self.dependency_index = ctx.dependencies.take();
         details::remember_focus(ui.ctx());
 
         if let Some((id, editing)) = ctx.priority_edit {
