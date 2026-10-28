@@ -4,7 +4,9 @@
 
 ## [Unreleased] - ReleaseDate
 
-- Large profiles with hundreds of mods no longer make the window lag while it is moved, scrolled or resized.
+## [0.6.1] - 2026-10-28
+
+- Large profiles with hundreds of mods no longer make the window lag while it is moved, scrolled, resized, filtered or searched.
 - Dragging or typing a mod's load priority now saves once and is undone in one step, instead of filling the undo history with every value in between.
 - The app uses almost no CPU while idle or minimized. It no longer rereads the installed mods every two seconds or repaints the window when nothing changed.
 
@@ -188,6 +190,7 @@ MINT Maintained features.
 
 <!-- next-url -->
 [Unreleased]: https://github.com/gabrielfordevelopment/mint-maintained/compare/master...develop
+[0.6.1]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.6.1
 [0.6.0]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.6.0
 [0.5.6]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.5.6
 [0.5.5]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.5.5
