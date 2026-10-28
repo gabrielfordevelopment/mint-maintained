@@ -5,6 +5,7 @@
 ## [Unreleased] - ReleaseDate
 
 - Large profiles with hundreds of mods no longer make the window lag while it is moved, scrolled or resized.
+- The app uses almost no CPU while idle or minimized. It no longer rereads the installed mods every two seconds or repaints the window when nothing changed.
 
 ## [0.6.0] - 2026-10-26
 

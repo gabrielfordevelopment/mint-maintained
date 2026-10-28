@@ -1,13 +1,24 @@
 use crate::{
-    integrate::status::{InstalledMod, InstalledState, read_installation},
+    integrate::status::{InstallationCache, InstalledMod, InstalledState},
     state::State,
 };
+use mint_lib::mod_info::ModSpecification;
 use std::{
     collections::HashMap,
     path::PathBuf,
-    sync::mpsc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     time::{Duration, Instant},
 };
+
+/// How often the background check looks for changed local files and installations.
+const CHECK_INTERVAL: Duration = Duration::from_secs(2);
+/// Rebuilds the request at most this rarely while nothing reported a change, as a safety net for
+/// metadata changes that arrive without a message.
+const REBUILD_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Clone, PartialEq, Eq)]
 struct Request {
@@ -15,11 +26,92 @@ struct Request {
     mods: Vec<(String, Option<InstalledMod>)>,
 }
 
+/// Background thread that compares the installation with the latest request. It wakes the UI only
+/// when the result changes, so an idle window does not repaint for it.
+struct Worker {
+    requests: mpsc::Sender<(Request, bool)>,
+    results: mpsc::Receiver<(Request, Comparison)>,
+    busy: Arc<AtomicBool>,
+}
+
+impl Worker {
+    fn spawn(ctx: &egui::Context) -> Option<Self> {
+        let (requests, request_rx) = mpsc::channel::<(Request, bool)>();
+        let (result_tx, results) = mpsc::channel();
+        let busy = Arc::new(AtomicBool::new(false));
+        let paused = busy.clone();
+        let ctx = ctx.clone();
+        std::thread::Builder::new()
+            .name("installation-status".into())
+            .spawn(move || {
+                let mut cache = InstallationCache::default();
+                let mut current: Option<Request> = None;
+                let mut sent: Option<Comparison> = None;
+                loop {
+                    match request_rx.recv_timeout(CHECK_INTERVAL) {
+                        Ok((mut request, mut force)) => {
+                            while let Ok((newer, newer_force)) = request_rx.try_recv() {
+                                request = newer;
+                                force |= newer_force;
+                            }
+                            if force {
+                                cache.clear();
+                            }
+                            if current.as_ref() != Some(&request) {
+                                sent = None;
+                            }
+                            current = Some(request);
+                        }
+                        Err(mpsc::RecvTimeoutError::Timeout) => {}
+                        Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                    }
+                    // Installing or editing may be writing the files being compared.
+                    if paused.load(Ordering::Acquire) {
+                        continue;
+                    }
+                    let Some(request) = &current else {
+                        continue;
+                    };
+                    let comparison = check(&mut cache, request);
+                    if sent.as_ref() != Some(&comparison) {
+                        sent = Some(comparison.clone());
+                        if result_tx.send((request.clone(), comparison)).is_err() {
+                            return;
+                        }
+                        ctx.request_repaint();
+                    }
+                }
+            })
+            .ok()?;
+        Some(Self {
+            requests,
+            results,
+            busy,
+        })
+    }
+}
+
+fn check(cache: &mut InstallationCache, request: &Request) -> Comparison {
+    let mut desired = request.mods.clone();
+    for (_, entry) in &mut desired {
+        if let Some(m) = entry
+            && m.read_local_stamp().is_err()
+        {
+            *entry = None;
+        }
+    }
+    compare(cache.read(&request.game), &desired)
+}
+
 #[derive(Default)]
 pub(super) struct InstallationStatus {
+    worker: Option<Worker>,
+    /// Game path and enabled mods the request was built from.
+    inputs: Option<(PathBuf, Vec<ModSpecification>)>,
+    built: Option<Instant>,
+    /// Mod metadata or the installation may have changed since the request was built.
+    stale: bool,
     requested: Option<Request>,
-    pending: Option<mpsc::Receiver<Comparison>>,
-    last_checked: Option<Instant>,
     pub summary: String,
     pub rows: HashMap<String, String>,
     /// The active profile is known to differ from the installed mods.
@@ -96,13 +188,24 @@ fn compare(installed: InstalledState, desired: &[(String, Option<InstalledMod>)]
 }
 
 impl InstallationStatus {
+    /// Background work finished, so metadata or the installed mods may have changed.
+    pub fn invalidate(&mut self) {
+        self.stale = true;
+    }
+
+    fn reset(&mut self) {
+        self.worker = None;
+        self.inputs = None;
+        self.built = None;
+        self.requested = None;
+        self.rows.clear();
+        self.needs_install = false;
+    }
+
     pub fn poll(&mut self, state: &State, ctx: &egui::Context, busy: bool) {
         let Some(game) = &state.config.drg_pak_path else {
+            self.reset();
             self.summary.clear();
-            self.rows.clear();
-            self.needs_install = false;
-            self.requested = None;
-            self.pending = None;
             return;
         };
         let specs = match state
@@ -111,80 +214,85 @@ impl InstallationStatus {
         {
             Ok(specs) => specs,
             Err(error) => {
+                self.reset();
                 self.summary = error.to_string();
-                self.rows.clear();
-                self.needs_install = false;
-                self.requested = None;
-                self.pending = None;
                 return;
             }
         };
-        let request = Request {
-            game: game.clone(),
-            mods: specs
-                .iter()
-                .map(|s| {
-                    (
-                        s.url.clone(),
-                        state
-                            .store
-                            .get_mod_info(s)
-                            .as_ref()
-                            .map(InstalledMod::from_info),
-                    )
-                })
-                .collect(),
+        if let Some(worker) = &self.worker {
+            worker.busy.store(busy, Ordering::Release);
+        }
+        // Looking up every mod's metadata is the expensive part, so it only happens when an
+        // input changed instead of on every frame.
+        let inputs = (game.clone(), specs);
+        if self.stale
+            || self.inputs.as_ref() != Some(&inputs)
+            || self.built.is_none_or(|t| t.elapsed() >= REBUILD_INTERVAL)
+        {
+            let force = std::mem::take(&mut self.stale);
+            let request = Request {
+                game: game.clone(),
+                mods: inputs
+                    .1
+                    .iter()
+                    .map(|s| {
+                        (
+                            s.url.clone(),
+                            state
+                                .store
+                                .get_mod_info(s)
+                                .as_ref()
+                                .map(InstalledMod::from_info),
+                        )
+                    })
+                    .collect(),
+            };
+            self.inputs = Some(inputs);
+            self.built = Some(Instant::now());
+            let changed = self.requested.as_ref() != Some(&request);
+            if changed {
+                self.rows.clear();
+                self.summary = "Checking installed mod versions...".into();
+                self.requested = Some(request.clone());
+            }
+            if changed || force {
+                if self.worker.is_none() {
+                    self.worker = Worker::spawn(ctx);
+                }
+                if let Some(worker) = &self.worker {
+                    worker.busy.store(busy, Ordering::Release);
+                    if worker.requests.send((request, force)).is_err() {
+                        self.worker = None;
+                    }
+                }
+            }
+        }
+        let Some(worker) = &self.worker else {
+            self.summary = "Installation status could not be checked.".into();
+            self.needs_install = false;
+            self.requested = None;
+            return;
         };
-        if let Some(rx) = &self.pending {
-            match rx.try_recv() {
-                Ok((summary, rows, needs_install)) => {
+        loop {
+            match worker.results.try_recv() {
+                Ok((request, (summary, rows, needs_install))) => {
                     if self.requested.as_ref() == Some(&request) {
                         self.summary = summary;
                         self.rows = rows;
                         self.needs_install = needs_install;
                     }
-                    self.pending = None;
                 }
+                Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => {
-                    self.pending = None;
+                    self.worker = None;
                     self.summary = "Installation status could not be checked.".into();
                     self.needs_install = false;
+                    // The next rebuild starts a new check.
+                    self.requested = None;
+                    break;
                 }
-                Err(mpsc::TryRecvError::Empty) => {}
             }
         }
-        let changed = self.requested.as_ref() != Some(&request);
-        if changed {
-            self.rows.clear();
-            self.needs_install = false;
-            self.summary = "Checking installed mod versions...".into();
-        }
-        if !busy
-            && self.pending.is_none()
-            && (changed
-                || self
-                    .last_checked
-                    .is_none_or(|t| t.elapsed() >= Duration::from_secs(2)))
-        {
-            self.requested = Some(request.clone());
-            self.last_checked = Some(Instant::now());
-            let (tx, rx) = mpsc::channel();
-            self.pending = Some(rx);
-            let ctx = ctx.clone();
-            std::thread::spawn(move || {
-                let mut desired = request.mods;
-                for (_, entry) in &mut desired {
-                    if let Some(m) = entry
-                        && m.read_local_stamp().is_err()
-                    {
-                        *entry = None;
-                    }
-                }
-                let _ = tx.send(compare(read_installation(&request.game), &desired));
-                ctx.request_repaint();
-            });
-        }
-        ctx.request_repaint_after(Duration::from_millis(500));
     }
 }
 

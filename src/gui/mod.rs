@@ -265,7 +265,9 @@ impl LastAction {
         }
     }
     fn timeago(&self) -> String {
-        let duration = Instant::now().duration_since(self.timestamp);
+        Self::timeago_after(Instant::now().duration_since(self.timestamp))
+    }
+    fn timeago_after(duration: Duration) -> String {
         let seconds = duration.as_secs();
         if seconds < 60 {
             format!("{seconds}s ago")
@@ -274,6 +276,19 @@ impl LastAction {
         } else {
             ">1h ago".into()
         }
+    }
+    /// Time until [`Self::timeago`] shows a different text, or `None` once it no longer changes.
+    fn timeago_changes_in(&self) -> Option<Duration> {
+        Self::timeago_changes_after(Instant::now().duration_since(self.timestamp))
+    }
+    fn timeago_changes_after(duration: Duration) -> Option<Duration> {
+        let step = match duration.as_secs() {
+            0..60 => 1,
+            60..3600 => 60,
+            _ => return None,
+        };
+        let next = (duration.as_secs() / step + 1) * step;
+        Some(Duration::from_secs(next) - duration)
     }
 }
 
@@ -514,8 +529,14 @@ impl eframe::App for App {
         }
 
         // message handling
+        let mut handled = false;
         while let Ok(msg) = self.rx.try_recv() {
             msg.handle(self);
+            handled = true;
+        }
+        // Background work is what changes mod metadata and the installed mods.
+        if handled {
+            self.installation_status.invalidate();
         }
 
         if ctx.input(|input| input.viewport().close_requested()) && self.self_update_rid.is_some() {

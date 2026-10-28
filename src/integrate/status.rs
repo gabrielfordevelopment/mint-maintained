@@ -4,7 +4,7 @@ use std::{
     fs::File,
     io::BufReader,
     path::{Path, PathBuf},
-    time::UNIX_EPOCH,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 pub const ENTRY: &str = "mint-installation.json";
@@ -95,6 +95,42 @@ pub fn read_installation(game_pak: &Path) -> InstalledState {
     })
 }
 
+/// Path, size and modification time of the installed mods pak.
+type PakStamp = (PathBuf, u64, SystemTime);
+
+fn pak_stamp(game_pak: &Path) -> Option<PakStamp> {
+    let installation = mint_lib::DRGInstallation::from_pak_path(game_pak).ok()?;
+    let path = installation.paks_path().join("mods_P.pak");
+    let metadata = std::fs::metadata(&path).ok()?;
+    Some((path, metadata.len(), metadata.modified().ok()?))
+}
+
+/// Reads the installation record again only after the installed pak changed. Large paks have
+/// large indexes, so periodic status checks must not parse them while nothing changes.
+#[derive(Default)]
+pub struct InstallationCache {
+    last: Option<(PakStamp, InstalledState)>,
+}
+
+impl InstallationCache {
+    pub fn read(&mut self, game_pak: &Path) -> InstalledState {
+        let stamp = pak_stamp(game_pak);
+        if let (Some(stamp), Some((last, state))) = (&stamp, &self.last)
+            && stamp == last
+        {
+            return state.clone();
+        }
+        let state = read_installation(game_pak);
+        self.last = stamp.map(|stamp| (stamp, state.clone()));
+        state
+    }
+
+    /// Forgets the last read, for example after mods were installed or removed.
+    pub fn clear(&mut self) {
+        self.last = None;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,6 +190,62 @@ mod tests {
             }
             assert_eq!(std::fs::read(&installed).unwrap(), bytes);
         }
+    }
+
+    #[test]
+    fn installation_cache_reads_the_pak_again_only_after_it_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        let paks = dir.path().join("FSD/Content/Paks");
+        std::fs::create_dir_all(&paks).unwrap();
+        let game = paks.join("FSD-WindowsNoEditor.pak");
+        std::fs::write(&game, b"game path fixture").unwrap();
+        let installed = paks.join("mods_P.pak");
+        let write = |mods: &[InstalledMod]| {
+            let mut pak = repak::PakBuilder::new().writer(
+                BufWriter::new(File::create(&installed).unwrap()),
+                repak::Version::V11,
+                "../../../".into(),
+                None,
+            );
+            let record = InstallationRecord {
+                version: 1,
+                mods: mods.to_vec(),
+            };
+            pak.write_file(ENTRY, false, serde_json::to_vec(&record).unwrap())
+                .unwrap();
+            pak.write_index().unwrap();
+        };
+        let entry = |n: u32| InstalledMod {
+            identity: format!("https://mod.io/g/drg/m/example#{n}"),
+            resolution: format!("https://mod.io/g/drg/m/example#{n}/10"),
+            local_stamp: None,
+        };
+        let known = |state: InstalledState| match state {
+            InstalledState::Known(mods) => mods,
+            other => panic!("unexpected state {other:?}"),
+        };
+        let mut cache = InstallationCache::default();
+        assert!(matches!(cache.read(&game), InstalledState::NotInstalled));
+        write(&[entry(1)]);
+        assert_eq!(known(cache.read(&game)), [entry(1)]);
+        // An unchanged pak is not parsed again, so even a damaged one keeps its last state.
+        let modified = std::fs::metadata(&installed).unwrap().modified().unwrap();
+        let len = std::fs::metadata(&installed).unwrap().len() as usize;
+        std::fs::write(&installed, vec![0; len]).unwrap();
+        File::options()
+            .write(true)
+            .open(&installed)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        assert_eq!(known(cache.read(&game)), [entry(1)]);
+        cache.clear();
+        assert!(matches!(cache.read(&game), InstalledState::Unknown(_)));
+        // A new installation is a different file, so it is read again.
+        write(&[entry(1), entry(2)]);
+        assert_eq!(known(cache.read(&game)), [entry(1), entry(2)]);
+        std::fs::remove_file(&installed).unwrap();
+        assert!(matches!(cache.read(&game), InstalledState::NotInstalled));
     }
 
     #[test]
