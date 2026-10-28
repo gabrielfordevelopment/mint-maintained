@@ -281,9 +281,16 @@ fn installation_status_is_checked_in_the_background_and_follows_profile_changes(
     test.app
         .installation_status
         .poll(&test.app.state, &test.context, false);
-    assert_eq!(
-        test.app.installation_status.summary,
-        "Checking installed mod versions..."
+    // The old result is dropped at once. The background check may already have answered the
+    // new request within the same poll.
+    assert!(
+        [
+            "Checking installed mod versions...",
+            "No mods installed. Click Install mods to apply this profile.",
+        ]
+        .contains(&test.app.installation_status.summary.as_str()),
+        "{}",
+        test.app.installation_status.summary
     );
     assert!(test.app.installation_status.rows.is_empty());
     wait_for(
