@@ -1641,3 +1641,47 @@ fn emptying_the_list_while_its_scroll_bar_is_dragged_does_not_break_scrolling() 
         "the list scrolls and renders normally again"
     );
 }
+
+#[test]
+fn filter_facts_read_enabled_state_live_and_refresh_after_background_work() {
+    let mut test = TestApp::new();
+    let [alpha, _, charlie] = three_mods(&mut test);
+    test.app.mod_filters = filters::ModFilters {
+        disabled: true,
+        ..Default::default()
+    };
+    let output = test.frame(vec![]);
+    assert!(rendered(&output, mod_list_name(&charlie)));
+    assert!(!rendered(&output, mod_list_name(&alpha)));
+    // Enabled state is not cached, so toggling applies on the next frame.
+    for entry in &mut test.app.state.mod_data.get_active_profile_mut().mods {
+        if let ModOrGroup::Individual(mc) = entry {
+            mc.enabled = !mc.enabled;
+        }
+    }
+    let output = test.frame(vec![]);
+    assert!(rendered(&output, mod_list_name(&alpha)));
+    assert!(!rendered(&output, mod_list_name(&charlie)));
+    assert!(test.app.facts.contains(&alpha.spec.url));
+
+    // A finished background operation can change metadata, so cached facts are dropped. Only
+    // mods still in the profile are looked up again.
+    test.app
+        .state
+        .mod_data
+        .get_active_profile_mut()
+        .mods
+        .retain(|entry| !matches!(entry, ModOrGroup::Individual(mc) if mc.spec == alpha.spec));
+    let rid = test.app.request_counter.next();
+    test.app
+        .tx
+        .try_send(message::Message::OperationFailed(rid))
+        .unwrap();
+    test.app.has_run_init = true;
+    test.app.state.config.drg_pak_path = None;
+    let _ = test.context.run(egui::RawInput::default(), |ctx| {
+        eframe::App::update(&mut test.app, ctx, &mut eframe::Frame::_new_kittest())
+    });
+    assert!(!test.app.facts.contains(&alpha.spec.url));
+    assert!(test.app.facts.contains(&charlie.spec.url));
+}

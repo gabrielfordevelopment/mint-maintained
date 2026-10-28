@@ -51,9 +51,38 @@ impl ModFilters {
 /// Matching and total member counts of a displayed group.
 pub(super) type GroupCounts = HashMap<String, (usize, usize)>;
 
+/// What the chips and the search read from a mod's metadata.
+struct SpecFacts {
+    update_available: bool,
+    missing_metadata: bool,
+    provider: Option<&'static str>,
+    name: Option<String>,
+    tags: Vec<&'static str>,
+}
+
+/// Metadata facts by spec URL. The chip counts, filters and search read them for every mod on
+/// every frame, and looking up metadata is far slower than reading this cache, so large profiles
+/// stay fast. Clear it whenever mod metadata may have changed.
+#[derive(Default)]
+pub(super) struct FactsCache(std::cell::RefCell<HashMap<String, std::rc::Rc<SpecFacts>>>);
+
+impl FactsCache {
+    pub(super) fn clear(&self) {
+        self.0.borrow_mut().clear();
+    }
+
+    #[cfg(test)]
+    pub(super) fn contains(&self, url: &str) -> bool {
+        self.0.borrow().contains_key(url)
+    }
+}
+
 impl App {
-    pub(super) fn row_facts(&self, mc: &ModConfig, parent_enabled: bool) -> RowFacts {
-        let info = self.state.store.get_mod_info(&mc.spec);
+    fn spec_facts(&self, spec: &ModSpecification) -> std::rc::Rc<SpecFacts> {
+        if let Some(facts) = self.facts.0.borrow().get(&spec.url) {
+            return facts.clone();
+        }
+        let info = self.state.store.get_mod_info(spec);
         let update_available = info.as_ref().is_some_and(|info| {
             info.provider == "modio"
                 && self
@@ -62,13 +91,39 @@ impl App {
                     .get_mod_info(&info.spec)
                     .is_some_and(|latest| latest.resolution.url != info.resolution.url)
         });
-        RowFacts {
-            enabled: parent_enabled && mc.enabled,
+        let facts = std::rc::Rc::new(SpecFacts {
             update_available,
             missing_metadata: info.is_none(),
             provider: info
+                .as_ref()
                 .map(|info| info.provider)
-                .or_else(|| ModStore::provider_id(&mc.spec.url)),
+                .or_else(|| ModStore::provider_id(&spec.url)),
+            tags: info
+                .as_ref()
+                .and_then(|info| info.modio_tags.as_ref())
+                .map(|tags| {
+                    mod_list::modio_tags(tags)
+                        .iter()
+                        .map(|tag| tag.label)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            name: info.map(|info| info.name),
+        });
+        self.facts
+            .0
+            .borrow_mut()
+            .insert(spec.url.clone(), facts.clone());
+        facts
+    }
+
+    pub(super) fn row_facts(&self, mc: &ModConfig, parent_enabled: bool) -> RowFacts {
+        let facts = self.spec_facts(&mc.spec);
+        RowFacts {
+            enabled: parent_enabled && mc.enabled,
+            update_available: facts.update_available,
+            missing_metadata: facts.missing_metadata,
+            provider: facts.provider,
         }
     }
 
@@ -79,15 +134,9 @@ impl App {
             return true;
         }
         let contains = |text: &str| find_string::contains_case_insensitive(text, search);
-        match self.state.store.get_mod_info(&mc.spec) {
-            Some(info) => {
-                contains(&info.name)
-                    || info.modio_tags.as_ref().is_some_and(|tags| {
-                        mod_list::modio_tags(tags)
-                            .iter()
-                            .any(|tag| contains(tag.label))
-                    })
-            }
+        let facts = self.spec_facts(&mc.spec);
+        match &facts.name {
+            Some(name) => contains(name) || facts.tags.iter().any(|tag| contains(tag)),
             None => contains(&mc.spec.url),
         }
     }

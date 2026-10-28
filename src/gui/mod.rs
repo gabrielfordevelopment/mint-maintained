@@ -219,6 +219,8 @@ pub struct App {
     details: Option<details::DetailsTarget>,
     /// Priority editor whose change is saved once it is released.
     priority_edit: Option<egui::Id>,
+    /// Metadata facts for filters and search.
+    facts: filters::FactsCache,
     mod_filters: filters::ModFilters,
     thumbnails: thumbnails::Thumbnails,
 }
@@ -300,6 +302,12 @@ enum LastActionStatus {
 }
 
 impl App {
+    /// Mod metadata or the installed mods may have changed, so cached facts are read again.
+    pub(super) fn metadata_changed(&mut self) {
+        self.installation_status.invalidate();
+        self.facts.clear();
+    }
+
     fn new(
         cc: &eframe::CreationContext,
         dirs: Dirs,
@@ -364,6 +372,7 @@ impl App {
             group_views: Default::default(),
             details: None,
             priority_edit: None,
+            facts: Default::default(),
             mod_filters: Default::default(),
             thumbnails,
         })
@@ -539,7 +548,7 @@ impl eframe::App for App {
         }
         // Background work is what changes mod metadata and the installed mods.
         if handled {
-            self.installation_status.invalidate();
+            self.metadata_changed();
         }
 
         if ctx.input(|input| input.viewport().close_requested()) && self.self_update_rid.is_some() {
