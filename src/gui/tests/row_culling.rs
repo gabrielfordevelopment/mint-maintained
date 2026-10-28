@@ -476,3 +476,60 @@ fn arrow_keys_reach_the_last_mod_through_skipped_rows() {
 fn arrow_keys_reach_the_last_mod_in_a_fully_drawn_list() {
     arrow_keys_reach_the_last_mod(false);
 }
+
+#[test]
+fn a_large_group_dragged_far_by_auto_scroll_matches_a_fully_drawn_list() {
+    let mut a = TestApp::new();
+    let mut b = TestApp::new();
+    long_profile(&mut a, &mut b, 200);
+    let output = same(&mut a, &mut b, vec![], "first frame");
+    let header = output
+        .shapes
+        .iter()
+        .find_map(|s| match &s.shape {
+            egui::Shape::Text(t) if t.galley.text() == "Large group" => {
+                Some(egui::Rect::from_min_size(t.pos, t.galley.size()).center())
+            }
+            _ => None,
+        })
+        .unwrap();
+    same(
+        &mut a,
+        &mut b,
+        vec![egui::Event::PointerMoved(header), button(header, true)],
+        "open",
+    );
+    let output = same(&mut a, &mut b, vec![button(header, false)], "open");
+    let handle = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .unwrap()
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some("Drag Large group"))
+        .and_then(|(_, node)| node.bounds())
+        .map(|r| egui::pos2(((r.x0 + r.x1) / 2.0) as f32, ((r.y0 + r.y1) / 2.0) as f32))
+        .unwrap();
+    same(
+        &mut a,
+        &mut b,
+        vec![egui::Event::PointerMoved(handle), button(handle, true)],
+        "press",
+    );
+    // Near the bottom edge the list scrolls on every frame while the group stays lifted.
+    let bottom = egui::pos2(handle.x, SIZE.y - 80.0);
+    for step in 0..12 {
+        let pos = handle.lerp(bottom, (step + 1) as f32 / 12.0);
+        same(&mut a, &mut b, vec![egui::Event::PointerMoved(pos)], "lift");
+    }
+    let before = serde_json::to_value(&*a.app.state.mod_data).unwrap();
+    for frame in 0..300 {
+        same(&mut a, &mut b, vec![], &format!("auto scroll frame {frame}"));
+    }
+    // Cancel the drag outside the list, leaving the saved order unchanged.
+    let outside = egui::pos2(handle.x, SIZE.y - 5.0);
+    same(&mut a, &mut b, vec![egui::Event::PointerMoved(outside)], "leave");
+    same(&mut a, &mut b, vec![button(outside, false)], "release");
+    assert_eq!(serde_json::to_value(&*a.app.state.mod_data).unwrap(), before);
+}

@@ -487,10 +487,21 @@ impl RowCulling {
     }
 
     /// The height to reserve instead of drawing the row at the cursor, or `None` to draw it.
-    fn skip(&mut self, ui: &Ui, key: egui::Id, entry: &ListTarget) -> Option<f32> {
+    /// `parent` is the group row of a group member: a dragged group shows all its members in
+    /// the preview, wherever it is lifted to.
+    fn skip(
+        &mut self,
+        ui: &Ui,
+        key: egui::Id,
+        entry: &ListTarget,
+        parent: Option<&ListTarget>,
+    ) -> Option<f32> {
         let window = self.window?;
         let height = *self.previous.get(&key)?;
-        if self.dragged.as_ref() == Some(entry)
+        if self
+            .dragged
+            .as_ref()
+            .is_some_and(|dragged| dragged == entry || Some(dragged) == parent)
             || self.held.contains(&key)
             || self.menus.contains(&key)
         {
@@ -1291,9 +1302,19 @@ impl App {
                                                     index: visual_index,
                                                     ..entry.clone()
                                                 };
+                                                let parent = ListTarget {
+                                                    profile: profile_name.clone(),
+                                                    group: None,
+                                                    index: row_index,
+                                                };
                                                 if let Some(height) =
                                                     ctx.culling.as_mut().and_then(|culling| {
-                                                        culling.skip(ui, ui.id(), &entry)
+                                                        culling.skip(
+                                                            ui,
+                                                            ui.id(),
+                                                            &entry,
+                                                            Some(&parent),
+                                                        )
                                                     })
                                                 {
                                                     let start = ui.painter().add(egui::Shape::Noop);
@@ -1561,7 +1582,7 @@ impl App {
                     && let Some(height) = ctx
                         .culling
                         .as_mut()
-                        .and_then(|culling| culling.skip(ui, paint_key, &entry))
+                        .and_then(|culling| culling.skip(ui, paint_key, &entry, None))
                 {
                     let (rect, slot) = ui
                         .push_id((profile_name.as_str(), &keys[store_index]), |ui| {
