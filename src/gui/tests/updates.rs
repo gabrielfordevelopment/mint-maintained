@@ -236,3 +236,95 @@ async fn first_run_explains_empty_profile_and_missing_game_installation() {
         egui::Shape::Text(text) if text.galley.text().starts_with("This profile has no mods")
     )));
 }
+
+#[test]
+fn installation_status_is_checked_in_the_background_and_follows_profile_changes() {
+    let mut test = TestApp::new();
+    let game = test.directory.path().join("game/FSD/Content/Paks");
+    std::fs::create_dir_all(&game).unwrap();
+    let game = game.join("FSD-WindowsNoEditor.pak");
+    std::fs::write(&game, b"game path fixture").unwrap();
+    let alpha = test.local_mod("alpha.pak");
+    test.app.state.mod_data.get_active_profile_mut().mods = vec![ModOrGroup::Individual(alpha)];
+    test.app.state.config.drg_pak_path = Some(game);
+    let wait_for = |test: &mut TestApp, summary: &str| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            test.app
+                .installation_status
+                .poll(&test.app.state, &test.context, false);
+            if test.app.installation_status.summary == summary {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "{}",
+                test.app.installation_status.summary
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    };
+    wait_for(
+        &mut test,
+        "No mods installed. Click Install mods to apply this profile.",
+    );
+    assert!(test.app.installation_status.needs_install);
+    assert_eq!(test.app.installation_status.rows.len(), 1);
+
+    // Disabling the only mod is a new request, answered without waiting for a periodic check.
+    let ModOrGroup::Individual(alpha) =
+        &mut test.app.state.mod_data.get_active_profile_mut().mods[0]
+    else {
+        unreachable!()
+    };
+    alpha.enabled = false;
+    test.app
+        .installation_status
+        .poll(&test.app.state, &test.context, false);
+    // The old result is dropped at once. The background check may already have answered the
+    // new request within the same poll.
+    assert!(
+        [
+            "Checking installed mod versions...",
+            "No mods installed. Click Install mods to apply this profile.",
+        ]
+        .contains(&test.app.installation_status.summary.as_str()),
+        "{}",
+        test.app.installation_status.summary
+    );
+    assert!(test.app.installation_status.rows.is_empty());
+    wait_for(
+        &mut test,
+        "No mods installed. Click Install mods to apply this profile.",
+    );
+    assert!(!test.app.installation_status.needs_install);
+
+    test.app.state.config.drg_pak_path = None;
+    test.app
+        .installation_status
+        .poll(&test.app.state, &test.context, false);
+    assert!(test.app.installation_status.summary.is_empty());
+    assert!(!test.app.installation_status.needs_install);
+}
+
+#[test]
+fn footer_time_repaints_only_when_its_text_changes() {
+    use std::time::Duration;
+    let after = |ms: u64| LastAction::timeago_changes_after(Duration::from_millis(ms));
+    let text = |ms: u64| LastAction::timeago_after(Duration::from_millis(ms));
+    for ms in [
+        0, 400, 59_999, 60_000, 61_500, 3_599_999, 3_600_000, 90_000_000,
+    ] {
+        match after(ms) {
+            Some(next) => {
+                let next = next.as_millis() as u64;
+                assert!(next > 0, "{ms}");
+                assert_eq!(text(ms), text(ms + next - 1), "{ms}");
+                assert_ne!(text(ms), text(ms + next), "{ms}");
+            }
+            None => assert_eq!(text(ms), text(ms + 86_400_000), "{ms}"),
+        }
+    }
+    assert_eq!(after(61_500), Some(Duration::from_millis(58_500)));
+    assert_eq!(after(3_600_000), None);
+}

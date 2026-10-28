@@ -155,7 +155,10 @@ impl App {
                         ))
                         .truncate(),
                     );
-                    ui.ctx().request_repaint_after(Duration::from_secs(1));
+                    // Repaint only when the relative time text changes, not every second.
+                    if let Some(next) = action.timeago_changes_in() {
+                        ui.ctx().request_repaint_after(next);
+                    }
                 } else if self.state.config.drg_pak_path.is_none() {
                     ui.weak("Select your DRG installation in Settings to install mods.");
                 } else {

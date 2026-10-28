@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 const LIFETIME: f64 = 10.0;
 const FADE: f64 = 0.18;
+const COUNTDOWN_FRAME: std::time::Duration = std::time::Duration::from_millis(33);
 
 struct Notification {
     text: String,
@@ -203,11 +204,15 @@ impl Notifications {
                         .paint_at(ui, egui::Rect::from_center_size(close_rect.center(), egui::Vec2::splat(24.0)));
                     if close.on_hover_text("Dismiss notification").clicked() { notification.closing = Some(now); }
                 });
-            if (!notification.error && !hovered)
-                || notification.closing.is_some()
+            let fading = notification.closing.is_some()
                 || now < notification.started.unwrap() + FADE
-            {
+                || (!notification.error && notification.age(now) >= LIFETIME);
+            if fading {
                 ctx.request_repaint();
+            } else if !notification.error && !hovered {
+                // The countdown bar moves a few pixels per step, so it needs no more than about
+                // 30 frames per second, even on high refresh rate displays.
+                ctx.request_repaint_after(COUNTDOWN_FRAME);
             }
         }
         if let Some(details) = &self.details {

@@ -227,3 +227,111 @@ fn history_keyboard_shortcuts_leave_text_editing_and_confirmation_alone() {
     test.full_frame(vec![key(egui::Key::Z, false)]);
     assert_eq!(test.app.state.mod_data.profiles["default"].mods.len(), 2);
 }
+
+#[test]
+fn dragging_a_priority_saves_once_and_undoes_in_one_step() {
+    let mut test = TestApp::new();
+    let alpha = test.local_mod("alpha.pak");
+    test.app.state.mod_data.get_active_profile_mut().mods = vec![ModOrGroup::Individual(alpha)];
+    test.app.save_mod_data("Add mods");
+    let base = test.app.history.undo_id();
+    let output = test.frame(vec![]);
+    let spin = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .unwrap()
+        .nodes
+        .iter()
+        .find(|(_, node)| node.role() == egui::accesskit::Role::SpinButton)
+        .and_then(|(_, node)| node.bounds())
+        .expect("priority editor is shown");
+    let start = egui::pos2(
+        ((spin.x0 + spin.x1) / 2.0) as f32,
+        ((spin.y0 + spin.y1) / 2.0) as f32,
+    );
+    let saved_priority = |test: &TestApp| {
+        let state = State::init(Dirs::from_path(test.directory.path()).unwrap()).unwrap();
+        match &state.mod_data.profiles["default"].mods[0] {
+            ModOrGroup::Individual(mc) => mc.priority,
+            ModOrGroup::Group { .. } => unreachable!(),
+        }
+    };
+    let priority = |test: &TestApp| match &test.app.state.mod_data.profiles["default"].mods[0] {
+        ModOrGroup::Individual(mc) => mc.priority,
+        ModOrGroup::Group { .. } => unreachable!(),
+    };
+    test.frame(vec![
+        egui::Event::PointerMoved(start),
+        egui::Event::PointerButton {
+            pos: start,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        },
+    ]);
+    let mut seen = Vec::new();
+    for step in 1..=8 {
+        test.frame(vec![egui::Event::PointerMoved(
+            start + egui::vec2(30.0 * step as f32, 0.0),
+        )]);
+        seen.push(priority(&test));
+    }
+    seen.dedup();
+    assert!(seen.len() > 2, "the drag passes several values: {seen:?}");
+    assert_eq!(
+        test.app.history.undo_id(),
+        base,
+        "nothing is recorded mid-drag"
+    );
+    assert_eq!(saved_priority(&test), 0, "nothing is saved mid-drag");
+
+    let end = start + egui::vec2(240.0, 0.0);
+    test.frame(vec![egui::Event::PointerButton {
+        pos: end,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    test.frame(vec![]);
+    let dragged = priority(&test);
+    assert!(dragged > 0);
+    assert_eq!(saved_priority(&test), dragged);
+    assert_ne!(test.app.history.undo_id(), base);
+
+    test.app.restore_history(false, None);
+    assert_eq!(priority(&test), 0);
+    assert_eq!(
+        test.app.history.undo_id(),
+        base,
+        "the drag was one undo step"
+    );
+    assert_eq!(saved_priority(&test), 0);
+}
+
+#[test]
+fn undo_during_a_priority_drag_saves_the_change_first() {
+    let mut test = TestApp::new();
+    let alpha = test.local_mod("alpha.pak");
+    test.app.state.mod_data.get_active_profile_mut().mods = vec![ModOrGroup::Individual(alpha)];
+    test.app.save_mod_data("Add mods");
+    let base = test.app.history.undo_id();
+    test.frame(vec![]);
+    if let ModOrGroup::Individual(mc) =
+        &mut test.app.state.mod_data.get_active_profile_mut().mods[0]
+    {
+        mc.priority = 7;
+    }
+    test.app.priority_changed(egui::Id::new("priority"), true);
+    test.app.restore_history(false, None);
+    assert!(
+        test.app.last_action.is_none(),
+        "undo must not report an outside change"
+    );
+    match &test.app.state.mod_data.profiles["default"].mods[0] {
+        ModOrGroup::Individual(mc) => assert_eq!(mc.priority, 0),
+        ModOrGroup::Group { .. } => unreachable!(),
+    }
+    assert!(test.app.priority_edit.is_none());
+    assert_eq!(test.app.history.undo_id(), base);
+}
