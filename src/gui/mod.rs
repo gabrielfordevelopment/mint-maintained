@@ -216,6 +216,11 @@ pub struct App {
     groups_window: Option<groups::GroupsWindow>,
     log_window: Option<log_window::LogWindow>,
     group_views: group_view::GroupViews,
+    /// Heights of mod rows, for skipping rows outside the visible part of the list.
+    row_heights: mod_list::RowHeights,
+    /// Whether rows outside the visible part of the list are skipped. Tests turn it off to
+    /// compare with a fully drawn list.
+    cull_rows: bool,
     details: Option<details::DetailsTarget>,
     /// Priority editor whose change is saved once it is released.
     priority_edit: Option<egui::Id>,
@@ -370,6 +375,8 @@ impl App {
             groups_window: None,
             log_window: None,
             group_views: Default::default(),
+            row_heights: Default::default(),
+            cull_rows: true,
             details: None,
             priority_edit: None,
             facts: Default::default(),

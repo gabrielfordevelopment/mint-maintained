@@ -9,6 +9,7 @@ mod history;
 mod interaction_fuzz;
 mod mod_list_views;
 mod notifications;
+mod row_culling;
 mod sorting_controls;
 mod unicode_text;
 mod updates;

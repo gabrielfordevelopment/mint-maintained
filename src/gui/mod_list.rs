@@ -1,5 +1,6 @@
 use super::*;
 use crate::state::edits::{Edit, ListTarget};
+use std::collections::HashSet;
 
 const ROW_PADDING: egui::Margin = egui::Margin::symmetric(0, 1);
 /// Options of the Compact/Normal switch, shared by the list toolbar and Settings.
@@ -406,6 +407,125 @@ fn selection_tint(visuals: &egui::Visuals, amount: f32) -> Color32 {
     )
 }
 
+/// Heights of mod rows when they were last drawn, keyed by their paint key, and the layout they
+/// were measured with.
+#[derive(Default)]
+pub(super) struct RowHeights {
+    layout: Option<egui::Id>,
+    heights: HashMap<egui::Id, f32>,
+    /// Rows drawn in the last frame.
+    drawn: HashSet<egui::Id>,
+    /// Rows drawn when a pointer button was pressed, kept drawn until it is released.
+    held: HashSet<egui::Id>,
+    /// Rows with an open context menu, kept drawn so the menu stays open.
+    menus: HashSet<egui::Id>,
+}
+
+/// Skips building mod rows far outside the visible part of the list, so a frame costs about the
+/// same with ten mods or a thousand. A skipped row only takes up the height it had when it was
+/// last drawn, so the scroll range, drop targets and arrow-key navigation stay as if it were
+/// drawn. Rows without a known height, the dragged row and every row while scrolling to a search
+/// match are always drawn.
+///
+/// egui resolves a click on release against the widget pressed earlier. The list can scroll in
+/// between, so rows drawn at the press stay drawn until release: a click, toggle or drag that
+/// started on a row reaches it even if it moved far away. A row's context menu is shown only
+/// while the row is built, so rows with an open menu stay drawn as well.
+struct RowCulling {
+    previous: HashMap<egui::Id, f32>,
+    held: HashSet<egui::Id>,
+    menus: HashSet<egui::Id>,
+    next: RowHeights,
+    /// Vertical range in which rows are drawn, or `None` to draw every row.
+    window: Option<egui::Rangef>,
+    dragged: Option<ListTarget>,
+}
+
+impl RowCulling {
+    fn new(ui: &Ui, heights: RowHeights, layout: egui::Id, draw_all: bool) -> Self {
+        let (pressed, holding) = ui.input(|input| {
+            let pointer = &input.pointer;
+            (
+                pointer.any_pressed(),
+                pointer.any_down() || pointer.any_released(),
+            )
+        });
+        let held = if pressed {
+            heights.drawn
+        } else if holding {
+            heights.held
+        } else {
+            HashSet::new()
+        };
+        let previous = if heights.layout == Some(layout) {
+            heights.heights
+        } else {
+            HashMap::new()
+        };
+        let dragged = drag_drop::dragged_source(ui.ctx());
+        let clip = ui.clip_rect();
+        // Rows a little outside the view are drawn as well. While dragging, rows slide by up to
+        // the dragged row's height, so a tall group must not uncover rows that were skipped.
+        let mut margin = (clip.height() / 2.0).max(64.0);
+        if dragged.is_some() {
+            margin += previous.values().copied().fold(0.0, f32::max);
+        }
+        Self {
+            previous,
+            next: RowHeights {
+                layout: Some(layout),
+                heights: HashMap::new(),
+                drawn: HashSet::new(),
+                held: held.clone(),
+                menus: HashSet::new(),
+            },
+            held,
+            menus: heights.menus,
+            window: (!draw_all).then(|| clip.y_range().expand(margin)),
+            dragged,
+        }
+    }
+
+    /// The height to reserve instead of drawing the row at the cursor, or `None` to draw it.
+    fn skip(&mut self, ui: &Ui, key: egui::Id, entry: &ListTarget) -> Option<f32> {
+        let window = self.window?;
+        let height = *self.previous.get(&key)?;
+        if self.dragged.as_ref() == Some(entry)
+            || self.held.contains(&key)
+            || self.menus.contains(&key)
+        {
+            return None;
+        }
+        let top = ui.cursor().top();
+        if top + height >= window.min && top <= window.max {
+            return None;
+        }
+        self.next.heights.insert(key, height);
+        Some(height)
+    }
+
+    fn measured(&mut self, key: egui::Id, height: f32) {
+        self.next.heights.insert(key, height);
+        self.next.drawn.insert(key);
+    }
+
+    fn menu_open(&mut self, key: egui::Id) {
+        self.next.menus.insert(key);
+    }
+}
+
+/// Space of a skipped row: its slot is still a click target while it has keyboard focus, so
+/// focus survives scrolling it out of view and arrow keys can step to it.
+fn skipped_row(ui: &mut Ui, height: f32, row_id: egui::Id) -> (egui::Rect, egui::Rect) {
+    let (_, mut rect) = ui.allocate_space(egui::vec2(ui.available_width(), height));
+    rect.max.x = ui.max_rect().right();
+    let slot = row_slot(ui, rect);
+    if ui.memory(|memory| memory.has_focus(row_id)) {
+        ui.interact(slot, row_id, egui::Sense::click());
+    }
+    (rect, slot)
+}
+
 /// Last component of a local path or URL, used as a readable label without metadata.
 fn short_label(url: &str) -> &str {
     url.trim_end_matches(['/', '\\'])
@@ -571,6 +691,10 @@ impl App {
             hide_details: bool,
             /// A priority editor that changed its value and whether it is still being edited.
             priority_edit: Option<(egui::Id, bool)>,
+            row_heights: RowHeights,
+            culling: Option<RowCulling>,
+            /// The current row's name has its context menu open.
+            name_menu_open: bool,
         }
         let mut ctx = Ctx {
             needs_save: false,
@@ -593,9 +717,29 @@ impl App {
             row_menu: None,
             hide_details: false,
             priority_edit: None,
+            row_heights: std::mem::take(&mut self.row_heights),
+            culling: None,
+            name_menu_open: false,
         };
+        // Row heights depend on the view and text size, not on the window width: rows truncate
+        // their text instead of wrapping.
+        let row_layout_key = egui::Id::new((
+            "row-heights",
+            list.view == ModListView::Normal,
+            list.compact_thumbnails,
+            ui.ctx().pixels_per_point().to_bits(),
+            ui.spacing().item_spacing.y.to_bits(),
+            ui.spacing().interact_size.y.to_bits(),
+        ));
+        let draw_all_rows = self.scroll_to_match || !self.cull_rows;
 
         let mut ui_profile = |ui: &mut Ui, profile: &mut ModProfile| {
+            ctx.culling = Some(RowCulling::new(
+                ui,
+                std::mem::take(&mut ctx.row_heights),
+                row_layout_key,
+                draw_all_rows,
+            ));
             let enabled_specs = profile
                 .mods
                 .iter()
@@ -990,6 +1134,7 @@ impl App {
                     );
                     ctx.row_menu = Some((mc.spec.clone(), modio, label.to_owned()));
                     res.context_menu(|ui| mod_menu(ctx, ui, &mc.spec, modio, group, row_index));
+                    ctx.name_menu_open = res.context_menu_opened();
                     if search.is_match && self.scroll_to_match {
                         res.scroll_to_me(None);
                         ctx.scroll_to_match = false;
@@ -1136,8 +1281,47 @@ impl App {
                                         ui.push_id(
                                             ("group", group_name.as_str(), &keys[index]),
                                             |ui| {
-                                                let stripe = ui.painter().add(egui::Shape::Noop);
                                                 let row_id = ui.id().with("row");
+                                                let entry = ListTarget {
+                                                    profile: profile_name.clone(),
+                                                    group: Some(group_name.clone()),
+                                                    index,
+                                                };
+                                                let target = ListTarget {
+                                                    index: visual_index,
+                                                    ..entry.clone()
+                                                };
+                                                if let Some(height) =
+                                                    ctx.culling.as_mut().and_then(|culling| {
+                                                        culling.skip(ui, ui.id(), &entry)
+                                                    })
+                                                {
+                                                    let start = ui.painter().add(egui::Shape::Noop);
+                                                    let (rect, slot) =
+                                                        skipped_row(ui, height, row_id);
+                                                    ctx.nav.push((
+                                                        Some(group_name.clone()),
+                                                        index,
+                                                        row_id,
+                                                        slot,
+                                                    ));
+                                                    ctx.rows.push(drag_drop::DropRow {
+                                                        rect,
+                                                        target,
+                                                        group: None,
+                                                        parent_index: Some(row_index),
+                                                        paint: drag_drop::RowPaint {
+                                                            entry,
+                                                            key: ui.id(),
+                                                            rect,
+                                                            start,
+                                                            end: start,
+                                                            container: None,
+                                                        },
+                                                    });
+                                                    return;
+                                                }
+                                                let stripe = ui.painter().add(egui::Shape::Noop);
                                                 reserve_row(ui, row_id);
                                                 ctx.row_menu = None;
                                                 let row = egui::Frame::NONE
@@ -1165,6 +1349,12 @@ impl App {
                                                             );
                                                         })
                                                     });
+                                                if let Some(culling) = &mut ctx.culling {
+                                                    culling.measured(
+                                                        ui.id(),
+                                                        row.response.rect.height(),
+                                                    );
+                                                }
                                                 let mut rect = row.response.rect;
                                                 rect.max.x = ui.max_rect().right();
                                                 let slot = row_slot(ui, rect);
@@ -1227,22 +1417,20 @@ impl App {
                                                         )
                                                     });
                                                 }
+                                                if (std::mem::take(&mut ctx.name_menu_open)
+                                                    || response.context_menu_opened())
+                                                    && let Some(culling) = &mut ctx.culling
+                                                {
+                                                    culling.menu_open(ui.id());
+                                                }
                                                 let end = ui.painter().add(egui::Shape::Noop);
                                                 ctx.rows.push(drag_drop::DropRow {
                                                     rect,
-                                                    target: ListTarget {
-                                                        profile: profile_name.clone(),
-                                                        group: Some(group_name.clone()),
-                                                        index: visual_index,
-                                                    },
+                                                    target,
                                                     group: None,
                                                     parent_index: Some(row_index),
                                                     paint: drag_drop::RowPaint {
-                                                        entry: ListTarget {
-                                                            profile: profile_name.clone(),
-                                                            group: Some(group_name.clone()),
-                                                            index,
-                                                        },
+                                                        entry,
                                                         key: ui.id(),
                                                         rect,
                                                         start: stripe,
@@ -1359,6 +1547,44 @@ impl App {
                 // Rows paint their stripe, hover or group color here, behind the frame's content.
                 let background = ui.painter().add(egui::Shape::Noop);
                 let row_id = egui::Id::new((profile_name.as_str(), &keys[store_index], "row"));
+                let paint_key = egui::Id::new((profile_name.as_str(), &keys[store_index]));
+                let entry = ListTarget {
+                    profile: profile_name.clone(),
+                    group: None,
+                    index: store_index,
+                };
+                let target = ListTarget {
+                    index: visual_index,
+                    ..entry.clone()
+                };
+                if group_name.is_none()
+                    && let Some(height) = ctx
+                        .culling
+                        .as_mut()
+                        .and_then(|culling| culling.skip(ui, paint_key, &entry))
+                {
+                    let (rect, slot) = ui
+                        .push_id((profile_name.as_str(), &keys[store_index]), |ui| {
+                            skipped_row(ui, height, row_id)
+                        })
+                        .inner;
+                    ctx.nav.push((None, store_index, row_id, slot));
+                    ctx.rows.push(drag_drop::DropRow {
+                        rect,
+                        target,
+                        group: None,
+                        parent_index: None,
+                        paint: drag_drop::RowPaint {
+                            entry,
+                            key: paint_key,
+                            rect,
+                            start: background,
+                            end: background,
+                            container: None,
+                        },
+                    });
+                    continue;
+                }
                 if group_name.is_none() {
                     reserve_row(ui, row_id);
                 }
@@ -1398,6 +1624,9 @@ impl App {
                         });
                     });
                 });
+                if let Some(culling) = &mut ctx.culling {
+                    culling.measured(paint_key, row.response.rect.height());
+                }
                 let selected = group_name.is_none() && is_selected(None, store_index);
                 let fill = match &group_name {
                     Some(name) => Some(group_fills[name]),
@@ -1448,6 +1677,11 @@ impl App {
                             mod_menu(&mut ctx, ui, &spec, modio, None, store_index)
                         });
                     }
+                    if (std::mem::take(&mut ctx.name_menu_open) || response.context_menu_opened())
+                        && let Some(culling) = &mut ctx.culling
+                    {
+                        culling.menu_open(paint_key);
+                    }
                 }
                 let container = group_name.as_ref().map(|name| {
                     group_views.get(&profile_name, name).rect = Some(rect);
@@ -1466,20 +1700,12 @@ impl App {
                 });
                 ctx.rows.push(drag_drop::DropRow {
                     rect,
-                    target: ListTarget {
-                        profile: profile_name.clone(),
-                        group: None,
-                        index: visual_index,
-                    },
+                    target,
                     group,
                     parent_index: None,
                     paint: drag_drop::RowPaint {
-                        entry: ListTarget {
-                            profile: profile_name.clone(),
-                            group: None,
-                            index: store_index,
-                        },
-                        key: egui::Id::new((profile_name.as_str(), &keys[store_index])),
+                        entry,
+                        key: paint_key,
                         rect: full_rect,
                         start: background,
                         end,
@@ -1515,6 +1741,9 @@ impl App {
                         }
                     }
                 }
+            }
+            if let Some(culling) = ctx.culling.take() {
+                ctx.row_heights = culling.next;
             }
             drag_drop::finish(
                 ui,
@@ -1557,6 +1786,7 @@ impl App {
         }
 
         self.scroll_to_match = ctx.scroll_to_match;
+        self.row_heights = std::mem::take(&mut ctx.row_heights);
         details::remember_focus(ui.ctx());
 
         if let Some((id, editing)) = ctx.priority_edit {
