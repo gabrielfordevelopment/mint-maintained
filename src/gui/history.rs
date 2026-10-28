@@ -78,6 +78,8 @@ impl App {
         if !self.history_available() {
             return;
         }
+        // A priority still being dragged is unsaved, which would look like an outside change.
+        self.flush_priority_edit();
         let entry = if redo {
             self.history.redo.last()
         } else {

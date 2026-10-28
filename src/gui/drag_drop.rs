@@ -63,6 +63,11 @@ struct Preview {
     gap: Option<egui::Rect>,
 }
 
+/// Stored position of the entry being dragged, if any.
+pub(super) fn dragged_source(ctx: &egui::Context) -> Option<ListTarget> {
+    egui::DragAndDrop::payload::<DraggedEntry>(ctx).map(|payload| payload.source.clone())
+}
+
 pub(super) fn can_hover_group(ctx: &egui::Context, profile: &str) -> bool {
     egui::DragAndDrop::payload::<DraggedEntry>(ctx)
         .is_some_and(|payload| !payload.is_group && payload.source.profile == profile)

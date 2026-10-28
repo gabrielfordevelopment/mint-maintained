@@ -47,6 +47,8 @@ impl App {
                             .provider_parameters
                             .insert(window.factory.id.to_string(), window.parameters);
                         self.report_save(self.state.config.save());
+                        // A newly configured provider can supply metadata.
+                        self.metadata_changed();
                         return;
                     }
                     Err(e) => {
