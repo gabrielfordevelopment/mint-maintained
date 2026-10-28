@@ -217,6 +217,8 @@ pub struct App {
     log_window: Option<log_window::LogWindow>,
     group_views: group_view::GroupViews,
     details: Option<details::DetailsTarget>,
+    /// Priority editor whose change is saved once it is released.
+    priority_edit: Option<egui::Id>,
     mod_filters: filters::ModFilters,
     thumbnails: thumbnails::Thumbnails,
 }
@@ -361,6 +363,7 @@ impl App {
             log_window: None,
             group_views: Default::default(),
             details: None,
+            priority_edit: None,
             mod_filters: Default::default(),
             thumbnails,
         })

@@ -101,6 +101,11 @@ fn thumbnail(
 
 pub(super) const PRIORITY_HINT: &str = "Load Priority\nIn case of asset conflict, mods with higher priority take precedent.\nCan have duplicate values.";
 
+/// Id of a priority editor whose value changed and whether it is still being dragged or typed in.
+pub(super) fn priority_editing(response: &egui::Response) -> (egui::Id, bool) {
+    (response.id, response.dragged() || response.has_focus())
+}
+
 pub(super) fn priority_value(priority: &mut i32) -> egui::DragValue<'_> {
     egui::DragValue::new(priority)
         .custom_formatter(|n, _| {
@@ -112,6 +117,38 @@ pub(super) fn priority_value(priority: &mut i32) -> egui::DragValue<'_> {
         })
         .speed(0.05)
         .range(RangeInclusive::new(-999, 999))
+}
+
+impl App {
+    /// Applies a changed priority. While its editor is still dragged or typed in, saving waits
+    /// until it is released, so one edit saves once and is one undo step instead of one per
+    /// intermediate value.
+    pub(super) fn priority_changed(&mut self, id: egui::Id, editing: bool) {
+        if editing {
+            self.priority_edit = Some(id);
+        } else {
+            self.priority_edit = None;
+            self.save_mod_data("Edit mod settings");
+        }
+    }
+
+    /// Saves a pending priority edit once its editor is no longer dragged or focused, even if the
+    /// editor is no longer shown.
+    pub(super) fn finish_priority_edit(&mut self, ctx: &egui::Context) {
+        if let Some(id) = self.priority_edit
+            && !ctx.is_being_dragged(id)
+            && !ctx.memory(|m| m.has_focus(id))
+        {
+            self.flush_priority_edit();
+        }
+    }
+
+    /// Saves a pending priority edit now, for example before undoing.
+    pub(super) fn flush_priority_edit(&mut self) {
+        if self.priority_edit.take().is_some() {
+            self.save_mod_data("Edit mod settings");
+        }
+    }
 }
 
 impl RowStriping {
@@ -532,6 +569,8 @@ impl App {
             /// Shown mod rows in display order, for stepping with the arrow keys.
             nav: Vec<(Option<String>, usize, egui::Id, egui::Rect)>,
             hide_details: bool,
+            /// A priority editor that changed its value and whether it is still being edited.
+            priority_edit: Option<(egui::Id, bool)>,
         }
         let mut ctx = Ctx {
             needs_save: false,
@@ -553,6 +592,7 @@ impl App {
             lines: Vec::new(),
             row_menu: None,
             hide_details: false,
+            priority_edit: None,
         };
 
         let mut ui_profile = |ui: &mut Ui, profile: &mut ModProfile| {
@@ -730,7 +770,7 @@ impl App {
                 }
 
                 if let Some(info) = &info {
-                    let previous_settings = (mc.spec.url.clone(), mc.priority);
+                    let previous_url = mc.spec.url.clone();
                     let dropdown = icons::combo_box("version")
                         .selected_text(
                             self.state
@@ -804,13 +844,17 @@ impl App {
                                 }
                                 _ => {}
                             }
-                            ui.add(priority_value(&mut mc.priority))
+                            let previous = mc.priority;
+                            let response = ui
+                                .add(priority_value(&mut mc.priority))
                                 .on_hover_text_at_pointer(PRIORITY_HINT);
+                            if mc.priority != previous {
+                                ctx.priority_edit = Some(priority_editing(&response));
+                            }
                         });
                     }
 
-                    ctx.needs_save |=
-                        previous_settings.0 != mc.spec.url || previous_settings.1 != mc.priority;
+                    ctx.needs_save |= previous_url != mc.spec.url;
                     if icons::button(ui, Icon::Copy, "Copy URL").clicked() {
                         ui.ctx().copy_text(mc.spec.url.to_string());
                         ctx.copied_link = true;
@@ -1515,9 +1559,13 @@ impl App {
         self.scroll_to_match = ctx.scroll_to_match;
         details::remember_focus(ui.ctx());
 
+        if let Some((id, editing)) = ctx.priority_edit {
+            self.priority_changed(id, editing);
+        }
         if ctx.needs_save {
             self.save_mod_data("Edit mod settings");
         }
+        self.finish_priority_edit(ui.ctx());
         if ctx.copied_link {
             self.notifications.success("Copied mod link.");
         }

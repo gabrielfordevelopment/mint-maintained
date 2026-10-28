@@ -274,6 +274,7 @@ impl App {
         }
         let mut close = false;
         let mut priority = mc.priority;
+        let mut priority_edit = (egui::Id::NULL, false);
         let mut check_update = false;
         let mut copied = false;
         let panel = egui::SidePanel::right(PANEL_ID)
@@ -407,8 +408,10 @@ impl App {
                                             ui.end_row();
                                         }
                                         field(ui, "Priority");
-                                        ui.add(mod_list::priority_value(&mut priority))
+                                        let response = ui
+                                            .add(mod_list::priority_value(&mut priority))
                                             .on_hover_text(mod_list::PRIORITY_HINT);
+                                        priority_edit = mod_list::priority_editing(&response);
                                         ui.end_row();
                                     });
                             });
@@ -516,7 +519,7 @@ impl App {
             && let Some(entry) = self.entry_mut(&selected.target)
         {
             entry.priority = priority;
-            self.save_mod_data("Edit mod settings");
+            self.priority_changed(priority_edit.0, priority_edit.1);
         }
         if copied {
             self.notifications.success("Copied mod link.");
