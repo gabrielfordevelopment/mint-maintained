@@ -4,6 +4,8 @@
 
 ## [Unreleased] - ReleaseDate
 
+- Fix building MINT Maintained and its development shell with the Nix flake.
+
 ## [0.6.1] - 2026-10-28
 
 - Large profiles with hundreds of mods no longer make the window lag while it is moved, scrolled, resized, filtered or searched.
