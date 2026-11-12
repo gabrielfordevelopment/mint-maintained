@@ -210,13 +210,22 @@ fn cleanup_retries_a_lock_after_the_updating_process_exits() {
     assert!(child.wait().unwrap().success());
     std::thread::sleep(Duration::from_millis(750));
     drop(lock);
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    // The cleanup retries for a minute, and a busy machine or a virus scan of the old
+    // executable can delay it by several seconds.
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
     while Path::new(&old).exists() && std::time::Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(50));
     }
+    let update_directory = Path::new(&old).parent().unwrap();
     assert!(
         !Path::new(&old).exists(),
-        "The old executable was not cleaned up after its lock was released"
+        "The old executable was not cleaned up after its lock was released. Left {:?}, cleanup error {:?}",
+        std::fs::read_dir(update_directory)
+            .map(|entries| entries
+                .map(|entry| entry.unwrap().file_name())
+                .collect::<Vec<_>>())
+            .unwrap_or_default(),
+        std::fs::read_to_string(update_directory.join("cleanup-error.txt")).ok()
     );
     assert_no_update_leftovers(
         directory.path(),

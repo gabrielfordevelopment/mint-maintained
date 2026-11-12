@@ -131,14 +131,15 @@ impl ModStore {
             .collect();
         let mut result = ResolvedMods::default();
         while !pending.is_empty() {
-            let batch = stream::iter(pending.into_iter().map(|spec| async move {
-                let resolved = self.resolve_mod(spec.clone(), update).await;
-                (spec, resolved)
-            }))
+            let batch = stream::iter(std::mem::take(&mut pending).into_iter().map(
+                |spec| async move {
+                    let resolved = self.resolve_mod(spec.clone(), update).await;
+                    (spec, resolved)
+                },
+            ))
             .buffered(5)
             .collect::<Vec<_>>()
             .await;
-            pending = Vec::new();
             for (spec, resolved) in batch {
                 match resolved {
                     Ok((original, info)) => {
