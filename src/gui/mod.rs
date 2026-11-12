@@ -924,7 +924,7 @@ impl eframe::App for App {
                         i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Escape)
                     })
                 {
-                    *search_string = String::new();
+                    search_string.clear();
                     self.scroll_to_match = false;
                 } else if self.focus_search {
                     res.request_focus();
