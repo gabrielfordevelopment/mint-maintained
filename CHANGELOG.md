@@ -4,6 +4,8 @@
 
 ## [Unreleased] - ReleaseDate
 
+## [0.6.2] - 2026-11-12
+
 - Fix building MINT Maintained and its development shell with the Nix flake.
 
 ## [0.6.1] - 2026-10-28
@@ -192,6 +194,7 @@ MINT Maintained features.
 
 <!-- next-url -->
 [Unreleased]: https://github.com/gabrielfordevelopment/mint-maintained/compare/master...develop
+[0.6.2]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.6.2
 [0.6.1]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.6.1
 [0.6.0]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.6.0
 [0.5.6]: https://github.com/gabrielfordevelopment/mint-maintained/releases/tag/v0.5.6
