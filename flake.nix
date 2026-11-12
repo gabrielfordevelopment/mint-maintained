@@ -52,6 +52,15 @@
 
       libraryPath = lib.makeLibraryPath libs;
 
+      # rust-overlay wraps the toolchain's gcc-ld/ld.lld with the native ELF linker wrapper, which
+      # adds "-z relro" and "-z now" for these flags. The windows-gnu hook is linked through that
+      # lld (see .cargo/config.toml), and its MinGW driver rejects -z. rustc already requests full
+      # RELRO for Linux targets itself, so the Linux binary keeps it.
+      hardeningDisable = [
+        "relro"
+        "bindnow"
+      ];
+
       manifest = lib.importTOML ./Cargo.toml;
       packageName = manifest.package.name;
       packageVersion = manifest.workspace.package.version;
@@ -72,6 +81,12 @@
         };
 
         doCheck = false;
+
+        inherit hardeningDisable;
+
+        # Nixpkgs forces system libraries for some -sys crates. Keep the vendored libgit2 and zstd
+        # that the other builds use, because the windows-gnu hook cannot use host pkg-config libraries.
+        dontCargoUseSystemLibs = true;
 
         preConfigure = ''
           export LD_LIBRARY_PATH="${libraryPath}"
@@ -96,6 +111,8 @@
         name = "mint";
 
         buildInputs = buildTools ++ libs;
+
+        inherit hardeningDisable;
 
         LD_LIBRARY_PATH = libraryPath;
         CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS = mingwRustflags;
